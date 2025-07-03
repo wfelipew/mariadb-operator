@@ -91,6 +91,11 @@ func (m *ExternalMariaDB) IsGaleraEnabled() bool {
 	return m.Status.IsGaleraEnabled
 }
 
+// Replication with defaulting accessor
+func (m *ExternalMariaDB) Replication() Replication {
+	return Replication{}
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:shortName=emdb
 // +kubebuilder:subresource:status
@@ -117,6 +122,11 @@ func (m *ExternalMariaDB) SetDefaults(env *environment.OperatorEnv) error {
 	}
 
 	return nil
+}
+
+// Get MariaDB Object Meta
+func (m *ExternalMariaDB) GetObjectMeta() *metav1.ObjectMeta {
+	return &m.ObjectMeta
 }
 
 // IsReady indicates whether the External MariaDB instance is ready
@@ -160,6 +170,11 @@ func (m *ExternalMariaDB) GetHost() string {
 	return m.Spec.Host
 }
 
+// Get specific MariaDB Pod hostname
+func (m *ExternalMariaDB) GetPodHost(podIndex int) string {
+	return ""
+}
+
 // Get MariaDB port
 func (m *ExternalMariaDB) GetPort() int32 {
 	return m.Spec.Port
@@ -168,6 +183,11 @@ func (m *ExternalMariaDB) GetPort() int32 {
 // Get MariaDB replicas
 func (m *ExternalMariaDB) GetReplicas() int32 {
 	return 1
+}
+
+// IsHAEnabled indicates whether the MariaDB instance has HA enabled (Always false for external MariaDB)
+func (m *ExternalMariaDB) IsHAEnabled() bool {
+	return false
 }
 
 // Get MariaDB Superuser name
