@@ -4894,6 +4894,45 @@ spec:
                         - AfterCommit
                         type: string
                     type: object
+                  replicaFromExternal:
+                    description: ReplicaReplication is the replication configuration
+                      for the replica nodes.
+                    properties:
+                      connectionRetries:
+                        description: ConnectionRetries to be used when the replica
+                          connects to the primary.
+                        type: integer
+                      connectionTimeout:
+                        description: ConnectionTimeout to be used when the replica
+                          connects to the primary.
+                        type: string
+                      gtid:
+                        description: |-
+                          Gtid indicates which Global Transaction ID should be used when connecting a replica to the master.
+                          See: https://mariadb.com/kb/en/gtid/#using-current_pos-vs-slave_pos.
+                        enum:
+                        - CurrentPos
+                        - SlavePos
+                        type: string
+                      mariaDbRef:
+                        description: MariaDBRef is a reference to a MariaDB object.
+                        properties:
+                          kind:
+                            description: ObjectReference is a reference to a object.
+                            type: string
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                          waitForIt:
+                            default: true
+                            description: WaitForIt indicates whether the controller
+                              using this reference should wait for MariaDB to be ready.
+                            type: boolean
+                        type: object
+                    required:
+                    - mariaDbRef
+                    type: object
                   syncBinlog:
                     description: |-
                       SyncBinlog indicates whether the binary log should be synchronized to the disk after every event.

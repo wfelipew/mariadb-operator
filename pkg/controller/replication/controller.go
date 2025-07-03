@@ -169,10 +169,14 @@ fi
 }
 
 func (r *ReplicationReconciler) reconcileReplication(ctx context.Context, req *reconcileRequest, logger logr.Logger) (ctrl.Result, error) {
+	replication := req.mariadb.Replication()
+	isExternalReplication := replication.IsExternalReplication()
+
 	if req.mariadb.IsSwitchingPrimary() {
 		return ctrl.Result{}, nil
 	}
-	if req.mariadb.Status.CurrentPrimaryPodIndex == nil {
+
+	if req.mariadb.Status.CurrentPrimaryPodIndex == nil && !isExternalReplication {
 		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
 	}
 
@@ -198,8 +202,10 @@ func (r *ReplicationReconciler) reconcileReplication(ctx context.Context, req *r
 func (r *ReplicationReconciler) reconcileReplicationInPod(ctx context.Context, req *reconcileRequest, logger logr.Logger, index int) error {
 	pod := statefulset.PodName(req.mariadb.ObjectMeta, index)
 	primaryPodIndex := *req.mariadb.Status.CurrentPrimaryPodIndex
+	replication := req.mariadb.Replication()
+	isExternalReplication := replication.IsExternalReplication()
 
-	if primaryPodIndex == index {
+	if primaryPodIndex == index && !isExternalReplication {
 		logger.Info("Configuring primary", "pod", pod)
 		client, err := req.clientSet.currentPrimaryClient(ctx)
 		if err != nil {

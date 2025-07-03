@@ -136,6 +136,39 @@ type ReplicaReplication struct {
 	SyncTimeout *metav1.Duration `json:"syncTimeout,omitempty"`
 }
 
+// ReplicaFromExternal is the replication configuration from external servers.
+type ReplicaFromExternal struct {
+
+	// MariaDBRef is a reference to a MariaDB object.
+	// +kubebuilder:validation:Required
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	MariaDBRef MariaDBRef `json:"mariaDbRef" webhook:"inmutable"`
+	// Gtid indicates which Global Transaction ID should be used when connecting a replica to the master.
+	// See: https://mariadb.com/kb/en/gtid/#using-current_pos-vs-slave_pos.
+	// +optional
+	// +kubebuilder:validation:Enum=CurrentPos;SlavePos
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	Gtid *Gtid `json:"gtid,omitempty"`
+	// // ReplPasswordSecretKeyRef provides a reference to the Secret to use as password for the replication user.
+	// // +optional
+	// // +operator-sdk:csv:customresourcedefinitions:type=spec
+	// ReplPasswordSecretKeyRef *GeneratedSecretKeyRef `json:"replPasswordSecretKeyRef,omitempty"`
+
+	// ConnectionTimeout to be used when the replica connects to the primary.
+	// +optional
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	ConnectionTimeout *metav1.Duration `json:"connectionTimeout,omitempty"`
+	// ConnectionRetries to be used when the replica connects to the primary.
+	// +optional
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:number"}
+	ConnectionRetries *int `json:"connectionRetries,omitempty"`
+	// // SyncTimeout defines the timeout for a replica to be synced with the primary when performing a primary switchover.
+	// // If the timeout is reached, the replica GTID will be reset and the switchover will continue.
+	// // +optional
+	// // +operator-sdk:csv:customresourcedefinitions:type=spec
+	// SyncTimeout *metav1.Duration `json:"syncTimeout,omitempty"`
+}
+
 // FillWithDefaults fills the current ReplicaReplication object with DefaultReplicationSpec.
 // This enables having minimal ReplicaReplication objects and provides sensible defaults.
 func (r *ReplicaReplication) FillWithDefaults() {
@@ -197,6 +230,10 @@ type ReplicationSpec struct {
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:advanced"}
 	Replica *ReplicaReplication `json:"replica,omitempty"`
+	// ReplicaReplication is the replication configuration for the replica nodes.
+	// +optional
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:advanced"}
+	ReplicaFromExternal *ReplicaFromExternal `json:"replicaFromExternal,omitempty"`
 	// SyncBinlog indicates whether the binary log should be synchronized to the disk after every event.
 	// It trades off performance for consistency.
 	// See: https://mariadb.com/kb/en/replication-and-binary-log-system-variables/#sync_binlog.
@@ -233,6 +270,22 @@ func (r *ReplicationSpec) FillWithDefaults() {
 		probesEnabled := *DefaultReplicationSpec.ProbesEnabled
 		r.ProbesEnabled = &probesEnabled
 	}
+}
+
+// IsExternalReplication returns true is external replication is defined
+func (r *ReplicationSpec) IsExternalReplication() bool {
+	if r.ReplicaFromExternal != nil {
+		return true
+	}
+	return true
+}
+
+// Return the MariaDB ref to the external primary MariaDB
+func (r *ReplicationSpec) GetExternalReplicationRef() MariaDBRef {
+	if r.IsExternalReplication() {
+		return r.ReplicaFromExternal.MariaDBRef
+	}
+	return MariaDBRef{}
 }
 
 var (

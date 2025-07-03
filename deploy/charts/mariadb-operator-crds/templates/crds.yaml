@@ -6602,37 +6602,24 @@ spec:
                         - CurrentPos
                         - SlavePos
                         type: string
-                      replPasswordSecretKeyRef:
-                        description: ReplPasswordSecretKeyRef provides a reference
-                          to the Secret to use as password for the replication user.
+                      mariaDbRef:
+                        description: MariaDBRef is a reference to a MariaDB object.
                         properties:
-                          generate:
-                            default: false
-                            description: Generate indicates whether the Secret should
-                              be generated if the Secret referenced is not present.
-                            type: boolean
-                          key:
+                          kind:
+                            description: ObjectReference is a reference to a object.
                             type: string
                           name:
-                            default: ""
                             type: string
-                        required:
-                        - key
+                          namespace:
+                            type: string
+                          waitForIt:
+                            default: true
+                            description: WaitForIt indicates whether the controller
+                              using this reference should wait for MariaDB to be ready.
+                            type: boolean
                         type: object
-                        x-kubernetes-map-type: atomic
-                      syncTimeout:
-                        description: |-
-                          SyncTimeout defines the timeout for a replica to be synced with the primary when performing a primary switchover.
-                          If the timeout is reached, the replica GTID will be reset and the switchover will continue.
-                        type: string
-                      waitPoint:
-                        description: |-
-                          WaitPoint defines whether the transaction should wait for ACK before committing to the storage engine.
-                          More info: https://mariadb.com/kb/en/semisynchronous-replication/#rpl_semi_sync_master_wait_point.
-                        enum:
-                        - AfterSync
-                        - AfterCommit
-                        type: string
+                    required:
+                    - mariaDbRef
                     type: object
                   syncBinlog:
                     description: |-

@@ -68,6 +68,9 @@ func (r *ReplicationConfig) ConfigurePrimary(ctx context.Context, mariadb *maria
 
 func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB, client *sqlClient.Client,
 	replicaPodIndex, primaryPodIndex int, resetSlavePos bool) error {
+	// replication := mariadb.Replication()
+	// isExternalReplication := replication.IsExternalReplication()
+
 	if err := client.ResetMaster(ctx); err != nil {
 		return fmt.Errorf("error resetting master: %v", err)
 	}
@@ -82,6 +85,12 @@ func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *maria
 	if err := client.EnableReadOnly(ctx); err != nil {
 		return fmt.Errorf("error enabling read_only: %v", err)
 	}
+
+	// if isExternalReplication {
+	//Get a viable backup
+	//Bootstrap node from backup
+	// }
+
 	if err := r.configureReplicaVars(ctx, mariadb, client, replicaPodIndex); err != nil {
 		return fmt.Errorf("error configuring replication variables: %v", err)
 	}
@@ -134,12 +143,7 @@ func (r *ReplicationConfig) configureReplicaVars(ctx context.Context, mariadb *m
 
 func (r *ReplicationConfig) changeMaster(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB, client *sqlClient.Client,
 	primaryPodIndex int) error {
-	replPasswordRef := newReplPasswordRef(mariadb)
-
-	password, err := r.refResolver.SecretKeyRef(ctx, replPasswordRef.SecretKeySelector, mariadb.Namespace)
-	if err != nil {
-		return fmt.Errorf("error getting replication password: %v", err)
-	}
+	replication := mariadb.Replication()
 
 	gtid := mariadbv1alpha1.GtidCurrentPos
 	if mariadb.Replication().Replica.Gtid != nil {
@@ -155,20 +159,53 @@ func (r *ReplicationConfig) changeMaster(ctx context.Context, mariadb *mariadbv1
 		return fmt.Errorf("error getting host option: %v", err)
 	}
 
-	changeMasterOpts := []sql.ChangeMasterOpt{
-		changeMasterHostOpt,
-		sql.WithChangeMasterPort(mariadb.Spec.Port),
-		sql.WithChangeMasterCredentials(replUser, password),
-		sql.WithChangeMasterGtid(gtidString),
-		sql.WithChangeMasterRetries(*mariadb.Replication().Replica.ConnectionRetries),
+	var changeMasterOpts []sql.ChangeMasterOpt
+
+	if !replication.IsExternalReplication() {
+		replPasswordRef := newReplPasswordRef(mariadb)
+		password, err := r.refResolver.SecretKeyRef(ctx, replPasswordRef.SecretKeySelector, mariadb.Namespace)
+		if err != nil {
+			return fmt.Errorf("error getting replication password: %v", err)
+		}
+		changeMasterOpts = []sql.ChangeMasterOpt{
+			changeMasterHostOpt,
+			sql.WithChangeMasterPort(mariadb.Spec.Port),
+			sql.WithChangeMasterCredentials(replUser, password),
+			sql.WithChangeMasterGtid(gtidString),
+			sql.WithChangeMasterRetries(*mariadb.Replication().Replica.ConnectionRetries),
+		}
+
+		if mariadb.IsTLSEnabled() {
+			changeMasterOpts = append(changeMasterOpts, sql.WithChangeMasterSSL(
+				builderpki.ClientCertPath,
+				builderpki.ClientKeyPath,
+				builderpki.CACertPath,
+			))
+		}
+	} else {
+		var emdb *mariadbv1alpha1.ExternalMariaDB
+		replPasswordRef, err := externalReplPasswordRef(mariadb, r.refResolver, ctx)
+		if err != nil {
+			return fmt.Errorf("error getting ExternalMariaDB password Ref: %v", err)
+		}
+		password, err := r.refResolver.SecretKeyRef(ctx, replPasswordRef, mariadb.Namespace)
+		if err != nil {
+			return fmt.Errorf("error getting ExternalMariaDB password replication secret: %v", err)
+		}
+		emdbRef := replication.GetExternalReplicationRef()
+		emdb, err = r.refResolver.ExternalMariaDB(ctx, &emdbRef, mariadb.Namespace)
+		if err != nil {
+			return fmt.Errorf("error getting ExternalMariaDB: %v", err)
+		}
+		changeMasterOpts = []sql.ChangeMasterOpt{
+			changeMasterHostOpt,
+			sql.WithChangeMasterPort(emdb.GetPort()),
+			sql.WithChangeMasterCredentials(*emdb.GetSUName(), password),
+			// sql.WithChangeMasterGtid(gtidString),
+			sql.WithChangeMasterRetries(*mariadb.Replication().Replica.ConnectionRetries),
+		}
 	}
-	if mariadb.IsTLSEnabled() {
-		changeMasterOpts = append(changeMasterOpts, sql.WithChangeMasterSSL(
-			builderpki.ClientCertPath,
-			builderpki.ClientKeyPath,
-			builderpki.CACertPath,
-		))
-	}
+
 	if err := client.ChangeMaster(ctx, changeMasterOpts...); err != nil {
 		return fmt.Errorf("error changing master: %v", err)
 	}
@@ -177,6 +214,7 @@ func (r *ReplicationConfig) changeMaster(ctx context.Context, mariadb *mariadbv1
 
 func (r *ReplicationConfig) getChangeMasterHost(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
 	primaryPodIndex int) (sql.ChangeMasterOpt, error) {
+	replication := mariadb.Replication()
 	logger := log.FromContext(ctx).
 		WithName("replication-config").
 		WithValues("image", mariadb.Spec.Image).
@@ -195,6 +233,20 @@ func (r *ReplicationConfig) getChangeMasterHost(ctx context.Context, mariadb *ma
 	isCompatibleVersion, err := v.GreaterThanOrEqual("10.6")
 	if err != nil {
 		return nil, fmt.Errorf("error comparing version: %v", err)
+	}
+	if replication.IsExternalReplication() {
+		emdbRef := replication.GetExternalReplicationRef()
+
+		emdb, err := r.refResolver.ExternalMariaDB(ctx, &emdbRef, mariadb.Namespace)
+		if err != nil {
+			return nil, fmt.Errorf("error gettinr ExternalMariaDB: %v", err)
+		}
+
+		//TODO Check hostname length
+
+		return sql.WithChangeMasterHost(
+			emdb.GetHost(),
+		), nil
 	}
 
 	if isCompatibleVersion {
@@ -284,6 +336,7 @@ func newReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB) mariadbv1alpha1.Genera
 	if mariadb.Replication().Enabled && mariadb.Replication().Replica.ReplPasswordSecretKeyRef != nil {
 		return *mariadb.Replication().Replica.ReplPasswordSecretKeyRef
 	}
+
 	return mariadbv1alpha1.GeneratedSecretKeyRef{
 		SecretKeySelector: mariadbv1alpha1.SecretKeySelector{
 			LocalObjectReference: mariadbv1alpha1.LocalObjectReference{
@@ -293,6 +346,27 @@ func newReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB) mariadbv1alpha1.Genera
 		},
 		Generate: true,
 	}
+}
+
+func externalReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB, r *refresolver.RefResolver,
+	ctx context.Context) (mariadbv1alpha1.SecretKeySelector, error) {
+	replication := mariadb.Replication()
+	if mariadb.Replication().Enabled && mariadb.Replication().Replica.ReplPasswordSecretKeyRef != nil {
+		return mariadb.Replication().Replica.ReplPasswordSecretKeyRef.SecretKeySelector, nil
+	}
+	if replication.IsExternalReplication() {
+		emdbRef := replication.GetExternalReplicationRef()
+		emdb, err := r.ExternalMariaDB(ctx, &emdbRef, mariadb.Namespace)
+		if err == nil {
+			return emdb.GetSUCredential(), nil
+		}
+	}
+	return mariadbv1alpha1.SecretKeySelector{
+		LocalObjectReference: mariadbv1alpha1.LocalObjectReference{
+			Name: "",
+		},
+		Key: "",
+	}, fmt.Errorf("Not able to get PasswordRef for external replication")
 }
 
 func serverId(index int) string {
