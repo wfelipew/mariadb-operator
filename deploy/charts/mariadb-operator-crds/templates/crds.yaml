@@ -6602,6 +6602,58 @@ spec:
                         - CurrentPos
                         - SlavePos
                         type: string
+                      replPasswordSecretKeyRef:
+                        description: ReplPasswordSecretKeyRef provides a reference
+                          to the Secret to use as password for the replication user.
+                        properties:
+                          generate:
+                            default: false
+                            description: Generate indicates whether the Secret should
+                              be generated if the Secret referenced is not present.
+                            type: boolean
+                          key:
+                            type: string
+                          name:
+                            default: ""
+                            type: string
+                        required:
+                        - key
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      syncTimeout:
+                        description: |-
+                          SyncTimeout defines the timeout for a replica to be synced with the primary when performing a primary switchover.
+                          If the timeout is reached, the replica GTID will be reset and the switchover will continue.
+                        type: string
+                      waitPoint:
+                        description: |-
+                          WaitPoint defines whether the transaction should wait for ACK before committing to the storage engine.
+                          More info: https://mariadb.com/kb/en/semisynchronous-replication/#rpl_semi_sync_master_wait_point.
+                        enum:
+                        - AfterSync
+                        - AfterCommit
+                        type: string
+                    type: object
+                  replicaFromExternal:
+                    description: ReplicaReplication is the replication configuration
+                      for the replica nodes.
+                    properties:
+                      connectionRetries:
+                        description: ConnectionRetries to be used when the replica
+                          connects to the primary.
+                        type: integer
+                      connectionTimeout:
+                        description: ConnectionTimeout to be used when the replica
+                          connects to the primary.
+                        type: string
+                      gtid:
+                        description: |-
+                          Gtid indicates which Global Transaction ID should be used when connecting a replica to the master.
+                          See: https://mariadb.com/kb/en/gtid/#using-current_pos-vs-slave_pos.
+                        enum:
+                        - CurrentPos
+                        - SlavePos
+                        type: string
                       mariaDbRef:
                         description: MariaDBRef is a reference to a MariaDB object.
                         properties:

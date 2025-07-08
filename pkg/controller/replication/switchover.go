@@ -25,10 +25,11 @@ type switchoverPhase struct {
 }
 
 func shouldReconcileSwitchover(mdb *mariadbv1alpha1.MariaDB) bool {
+	replication := mdb.Replication()
 	if mdb.IsMaxScaleEnabled() || mdb.IsRestoringBackup() || mdb.IsResizingStorage() {
 		return false
 	}
-	if !mdb.IsReplicationConfigured() {
+	if !mdb.IsReplicationConfigured() || replication.IsExternalReplication() {
 		return false
 	}
 	if mdb.Status.CurrentPrimaryPodIndex == nil {

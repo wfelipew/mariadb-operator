@@ -62,6 +62,10 @@ func (r *PodReplicationController) ReconcilePodNotReady(ctx context.Context, pod
 		return nil
 	}
 
+	if mariadb.Replication().ReplicaFromExternal != nil {
+		return fmt.Errorf("error External Replication not ready")
+	}
+
 	fromIndex := mariadb.Status.CurrentPrimaryPodIndex
 	toIndex, err := health.HealthyMariaDBReplica(ctx, r, mariadb)
 	if err != nil {

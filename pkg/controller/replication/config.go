@@ -14,6 +14,9 @@ import (
 	sqlClient "github.com/mariadb-operator/mariadb-operator/pkg/sql"
 	"github.com/mariadb-operator/mariadb-operator/pkg/statefulset"
 	"github.com/mariadb-operator/mariadb-operator/pkg/version"
+	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -68,8 +71,8 @@ func (r *ReplicationConfig) ConfigurePrimary(ctx context.Context, mariadb *maria
 
 func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB, client *sqlClient.Client,
 	replicaPodIndex, primaryPodIndex int, resetSlavePos bool) error {
-	// replication := mariadb.Replication()
-	// isExternalReplication := replication.IsExternalReplication()
+	replication := mariadb.Replication()
+	isExternalReplication := replication.IsExternalReplication()
 
 	if err := client.ResetMaster(ctx); err != nil {
 		return fmt.Errorf("error resetting master: %v", err)
@@ -86,10 +89,95 @@ func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *maria
 		return fmt.Errorf("error enabling read_only: %v", err)
 	}
 
-	// if isExternalReplication {
-	//Get a viable backup
-	//Bootstrap node from backup
-	// }
+	if isExternalReplication {
+
+		// Get external mariadb
+		emdb, err := r.refResolver.ExternalMariaDB(ctx, &replication.ReplicaFromExternal.MariaDBRef, mariadb.Namespace)
+		if err != nil {
+			return fmt.Errorf("erro getting external MariaDB object: %v", err)
+		}
+		key := types.NamespacedName{
+			Name:      emdb.Name,
+			Namespace: emdb.Namespace,
+		}
+		// Check if a viable backup already exists
+		var existingBackup mariadbv1alpha1.Backup
+		err = r.Get(ctx, key, &existingBackup)
+
+		// Create a new backup if required
+		if err != nil {
+			backupOps := builder.BackupOpts{
+				Metadata: []*mariadbv1alpha1.Metadata{emdb.Spec.InheritMetadata},
+				Key:      key,
+				MariaDBRef: mariadbv1alpha1.MariaDBRef{
+					ObjectReference: mariadbv1alpha1.ObjectReference{
+						Name: emdb.Name,
+					},
+					Kind: mariadbv1alpha1.ExternalMariaDBKind,
+				},
+				Args: []string{
+					"--master-data=1",
+					"--gtid",
+					"--verbose",
+					"--all-databases",
+					"--single-transaction",
+				},
+				Compression: mariadbv1alpha1.CompressGzip,
+				Storage: mariadbv1alpha1.BackupStorage{
+					PersistentVolumeClaim: &mariadbv1alpha1.PersistentVolumeClaimSpec{
+						AccessModes: []corev1.PersistentVolumeAccessMode{
+							corev1.ReadWriteOnce,
+						},
+						Resources: v1.VolumeResourceRequirements{
+							Requests: v1.ResourceList{
+								"storage": resource.MustParse("5Gi"),
+							},
+						},
+					},
+				},
+			}
+
+			backup, err := r.builder.BuildBackup(backupOps, emdb)
+			if err != nil {
+				return fmt.Errorf("erro building Backup object: %v", err)
+			}
+			if err := r.Create(ctx, backup); err != nil {
+				return fmt.Errorf("error creating base Backup: %v", err)
+			}
+			return nil
+		}
+
+		if !existingBackup.IsComplete() {
+			return nil
+		}
+
+		// Check if a restore is running
+
+		// if !mariadb.HasRestoredBackup() {
+		// 	return nil
+		// }
+
+		var existingRestore mariadbv1alpha1.Restore
+		err = r.Get(ctx, mariadb.RestoreKey(), &existingRestore)
+
+		if err == nil && !existingRestore.IsComplete() {
+			return nil
+		}
+
+		if !existingBackup.IsComplete() {
+			// Restore/Bootstrap node from backup
+			return newRestore(mariadb, *r, ctx)
+			// restore, err := r.builder.BuildRestore(mariadb, mariadb.RestoreKey())
+			// if err != nil {
+			// 	return fmt.Errorf("error building Restore object: %v", err)
+			// }
+			// if err := r.Create(ctx, restore); err != nil {
+			// 	return fmt.Errorf("error creating Restore object: %v", err)
+			// }
+			// return nil
+		}
+
+	}
 
 	if err := r.configureReplicaVars(ctx, mariadb, client, replicaPodIndex); err != nil {
 		return fmt.Errorf("error configuring replication variables: %v", err)
@@ -328,6 +416,17 @@ func (r *ReplicationConfig) reconcileUserSql(ctx context.Context, mariadb *maria
 		accountName,
 	); err != nil {
 		return fmt.Errorf("error creating grant: %v", err)
+	}
+	return nil
+}
+
+func newRestore(mariadb *mariadbv1alpha1.MariaDB, r ReplicationConfig, ctx context.Context) error {
+	restore, err := r.builder.BuildRestore(mariadb, mariadb.RestoreKey())
+	if err != nil {
+		return fmt.Errorf("error building Restore object: %v", err)
+	}
+	if err := r.Create(ctx, restore); err != nil {
+		return fmt.Errorf("error creating Restore object: %v", err)
 	}
 	return nil
 }

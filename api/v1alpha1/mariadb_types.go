@@ -1103,7 +1103,7 @@ func (m *MariaDB) GetImage() string {
 
 // Get MariaDB hostname
 func (m *MariaDB) GetHost() string {
-	if m.Replication().Enabled {
+	if m.Replication().Enabled && m.Replication().ReplicaFromExternal == nil {
 		return statefulset.ServiceFQDNWithService(
 			m.ObjectMeta,
 			m.PrimaryServiceKey().Name,

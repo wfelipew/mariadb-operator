@@ -40,9 +40,20 @@ func (b *Builder) BuildRestore(mariadb *mariadbv1alpha1.MariaDB, key types.Names
 	containerTpl.Resources = restoreJob.Resources
 	containerTpl.Args = restoreJob.Args
 
-	restoreSource, err := bootstrapFrom.RestoreSource()
-	if err != nil {
-		return nil, fmt.Errorf("error getting restore source: %v", err)
+	var restoreSource *mariadbv1alpha1.RestoreSource
+	var err error
+	if mariadb.Replication().ReplicaFromExternal == nil {
+		restoreSource, err = bootstrapFrom.RestoreSource()
+
+		if err != nil {
+			return nil, fmt.Errorf("error getting restore source: %v", err)
+		}
+	} else {
+		restoreSource = &mariadbv1alpha1.RestoreSource{
+			BackupRef: &mariadbv1alpha1.LocalObjectReference{
+				Name: mariadb.Replication().ReplicaFromExternal.MariaDBRef.Name,
+			},
+		}
 	}
 
 	restore := &mariadbv1alpha1.Restore{

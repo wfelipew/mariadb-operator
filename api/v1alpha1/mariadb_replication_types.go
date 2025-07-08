@@ -274,10 +274,7 @@ func (r *ReplicationSpec) FillWithDefaults() {
 
 // IsExternalReplication returns true is external replication is defined
 func (r *ReplicationSpec) IsExternalReplication() bool {
-	if r.ReplicaFromExternal != nil {
-		return true
-	}
-	return true
+	return r.ReplicaFromExternal != nil
 }
 
 // Return the MariaDB ref to the external primary MariaDB
