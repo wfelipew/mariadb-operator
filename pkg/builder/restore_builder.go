@@ -10,7 +10,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-func (b *Builder) BuildRestore(mariadb *mariadbv1alpha1.MariaDB, key types.NamespacedName) (*mariadbv1alpha1.Restore, error) {
+type RestoreOpts struct {
+	PodIndex *int
+}
+
+// type CertOpt func(*CertOpts)
+
+func (b *Builder) BuildRestore(mariadb *mariadbv1alpha1.MariaDB, key types.NamespacedName,
+	opts RestoreOpts) (*mariadbv1alpha1.Restore, error) {
 	objMeta :=
 		metadata.NewMetadataBuilder(key).
 			WithMetadata(mariadb.Spec.InheritMetadata).
@@ -72,6 +79,9 @@ func (b *Builder) BuildRestore(mariadb *mariadbv1alpha1.MariaDB, key types.Names
 	}
 	if restoreJob.Metadata != nil {
 		restore.Spec.InheritMetadata = restoreJob.Metadata
+	}
+	if opts.PodIndex != nil {
+		restore.Spec.PodIndex = opts.PodIndex
 	}
 
 	if err := controllerutil.SetControllerReference(mariadb, restore, b.scheme); err != nil {

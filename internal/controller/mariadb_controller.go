@@ -506,8 +506,8 @@ func (r *MariaDBReconciler) reconcileRestore(ctx context.Context, mdb *mariadbv1
 	}); err != nil {
 		return ctrl.Result{}, fmt.Errorf("error patching status: %v", err)
 	}
-
-	restore, err := r.Builder.BuildRestore(mdb, mdb.RestoreKey())
+	restoreOpts := builder.RestoreOpts{}
+	restore, err := r.Builder.BuildRestore(mdb, mdb.RestoreKey(), restoreOpts)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("error building restore: %v", err)
 	}

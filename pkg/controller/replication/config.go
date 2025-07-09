@@ -155,18 +155,18 @@ func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *maria
 
 		// if !mariadb.HasRestoredBackup() {
 		// 	return nil
-		// }
+		// }s
 
 		var existingRestore mariadbv1alpha1.Restore
-		err = r.Get(ctx, mariadb.RestoreKey(), &existingRestore)
+		err = r.Get(ctx, mariadb.RestoreKeyInPod(replicaPodIndex), &existingRestore)
 
 		if err == nil && !existingRestore.IsComplete() {
 			return nil
 		}
 
-		if !existingBackup.IsComplete() {
+		if !existingRestore.IsComplete() {
 			// Restore/Bootstrap node from backup
-			return newRestore(mariadb, *r, ctx)
+			return newRestore(mariadb, *r, ctx, replicaPodIndex)
 			// restore, err := r.builder.BuildRestore(mariadb, mariadb.RestoreKey())
 			// if err != nil {
 			// 	return fmt.Errorf("error building Restore object: %v", err)
@@ -420,15 +420,19 @@ func (r *ReplicationConfig) reconcileUserSql(ctx context.Context, mariadb *maria
 	return nil
 }
 
-func newRestore(mariadb *mariadbv1alpha1.MariaDB, r ReplicationConfig, ctx context.Context) error {
-	restore, err := r.builder.BuildRestore(mariadb, mariadb.RestoreKey())
+func newRestore(mariadb *mariadbv1alpha1.MariaDB, r ReplicationConfig, ctx context.Context, replicaPodIndex int) error {
+	restoreOpts := builder.RestoreOpts{
+		PodIndex: &replicaPodIndex,
+	}
+	restore, err := r.builder.BuildRestore(mariadb, mariadb.RestoreKeyInPod(replicaPodIndex), restoreOpts)
 	if err != nil {
 		return fmt.Errorf("error building Restore object: %v", err)
 	}
 	if err := r.Create(ctx, restore); err != nil {
 		return fmt.Errorf("error creating Restore object: %v", err)
 	}
-	return nil
+	return fmt.Errorf("CREATING Restore object: %v", restore.Name)
+	// return nil
 }
 
 func newReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB) mariadbv1alpha1.GeneratedSecretKeyRef {

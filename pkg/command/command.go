@@ -55,6 +55,28 @@ func ConnectionFlags(co *CommandOpts, mariadb interfaces.ConnectionParamsAwareIn
 	return flags, nil
 }
 
+func PodConnectionFlags(co *CommandOpts, mariadb interfaces.ConnectionParamsAwareInterface, podIndex int) (string, error) {
+
+	if co.UserEnv == "" {
+		return "", errors.New("UserEnv must be set")
+	}
+	if co.PasswordEnv == "" {
+		return "", errors.New("PasswordEnv must be set")
+	}
+
+	flags := fmt.Sprintf(
+		"--user=${%s} --password=${%s} --host=%s --port=%d",
+		co.UserEnv,
+		co.PasswordEnv,
+		mariadb.GetPodHost(podIndex),
+		mariadb.GetPort(),
+	)
+	if co.Database != nil {
+		flags += fmt.Sprintf(" --database=%s", *co.Database)
+	}
+	return flags, nil
+}
+
 // func host(mariadb interfaces.MariaDBGenericInterface) string {
 
 // 	if mariadb.GetObjectKind().GroupVersionKind().Kind == mariadbv1alpha1.ExternalMariaDBKind {

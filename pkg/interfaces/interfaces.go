@@ -28,6 +28,7 @@ type ReplicationAwareInterface interface {
 
 type ConnectionParamsAwareInterface interface {
 	GetHost() string
+	GetPodHost(podIndex int) string
 	GetPort() int32
 	GetSUName() *string
 	GetSUCredential() mariadbv1alpha1.SecretKeySelector

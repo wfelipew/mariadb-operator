@@ -1112,6 +1112,15 @@ func (m *MariaDB) GetHost() string {
 	return statefulset.ServiceFQDN(m.ObjectMeta)
 }
 
+// Get specific MariaDB Pod hostname
+func (m *MariaDB) GetPodHost(podIndex int) string {
+	return statefulset.PodFQDNWithService(
+		m.ObjectMeta,
+		podIndex,
+		m.InternalServiceKey().Name,
+	)
+}
+
 // Get MariaDB port
 func (m *MariaDB) GetPort() int32 {
 	return m.Spec.Port
@@ -1225,6 +1234,11 @@ func (m *ExternalMariaDB) IsTLSEnabled() bool {
 // Get MariaDB hostname
 func (m *ExternalMariaDB) GetHost() string {
 	return m.Spec.Host
+}
+
+// Get specific MariaDB Pod hostname
+func (m *ExternalMariaDB) GetPodHost(podIndex int) string {
+	return ""
 }
 
 // Get MariaDB port

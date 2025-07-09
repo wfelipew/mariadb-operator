@@ -4072,6 +4072,11 @@ func (in *RestoreSpec) DeepCopyInto(out *RestoreSpec) {
 	in.JobPodTemplate.DeepCopyInto(&out.JobPodTemplate)
 	in.RestoreSource.DeepCopyInto(&out.RestoreSource)
 	out.MariaDBRef = in.MariaDBRef
+	if in.PodIndex != nil {
+		in, out := &in.PodIndex, &out.PodIndex
+		*out = new(int)
+		**out = **in
+	}
 	if in.InheritMetadata != nil {
 		in, out := &in.InheritMetadata, &out.InheritMetadata
 		*out = new(Metadata)
