@@ -2,6 +2,7 @@ package builder
 
 import (
 	"fmt"
+	"time"
 
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/api/v1alpha1"
 	metadata "github.com/mariadb-operator/mariadb-operator/pkg/builder/metadata"
@@ -19,6 +20,8 @@ type BackupOpts struct {
 	Args        []string
 	Resources   mariadbv1alpha1.ResourceRequirements
 	Affinity    mariadbv1alpha1.AffinityConfig
+	// MaxRetention metav1.Duration
+	MaxRetention time.Duration
 }
 
 func (b *Builder) BuildBackup(opts BackupOpts, owner metav1.Object) (*mariadbv1alpha1.Backup, error) {
@@ -35,6 +38,9 @@ func (b *Builder) BuildBackup(opts BackupOpts, owner metav1.Object) (*mariadbv1a
 			Storage:     opts.Storage,
 			MariaDBRef:  opts.MariaDBRef,
 			Compression: opts.Compression,
+			MaxRetention: metav1.Duration{
+				Duration: opts.MaxRetention,
+			},
 			JobContainerTemplate: mariadbv1alpha1.JobContainerTemplate{
 				Args:      opts.Args,
 				Resources: &opts.Resources,

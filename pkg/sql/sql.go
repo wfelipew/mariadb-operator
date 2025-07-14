@@ -48,6 +48,20 @@ type Opts struct {
 	Timeout *time.Duration
 }
 
+type ReplicaStatus struct {
+	MasterHost          sql.NullString `mysql:"Master_Host"`
+	MasterUser          sql.NullString `mysql:"Master_User"`
+	MasterPort          sql.NullInt32  `mysql:"Master_Port"`
+	SlaveIORunning      string         `mysql:"Slave_IO_Running"`
+	SlaveSQLRunning     string         `mysql:"Slave_SQL_Running"`
+	LastError           sql.NullString `mysql:"Last_Error"`
+	LastIOError         sql.NullString `mysql:"Last_IO_Error"`
+	LastIOErrno         sql.NullInt32  `mysql:"Last_IO_Errno"`
+	LastSQLError        sql.NullString `mysql:"Last_SQL_Error"`
+	LastSQLErrno        sql.NullInt32  `mysql:"Last_SQL_Errno"`
+	SecondsBehindMaster sql.NullInt64  `mysql:"Seconds_Behind_Master"`
+}
+
 type Opt func(*Opts)
 
 func WithUsername(username string) Opt {
@@ -790,6 +804,127 @@ MASTER_SSL_VERIFY_SERVER_CERT=0;
 		return "", fmt.Errorf("error rendering CHANGE MASTER template: %v", err)
 	}
 	return buf.String(), nil
+}
+
+func (c *Client) IsReplicationConfigured(ctx context.Context) (bool, string) {
+	sql := "SHOW REPLICA STATUS"
+	rows, err := c.db.QueryContext(ctx, sql)
+	if err != nil {
+		return false, err.Error()
+	}
+
+	count := 0
+	for rows.Next() {
+		count++
+	}
+
+	if count == 0 {
+		return false, ""
+	}
+
+	return true, ""
+}
+
+func (c *Client) GetReplicationStatus(ctx context.Context) (ReplicaStatus, error) {
+	query := "SHOW REPLICA STATUS"
+	row := c.db.QueryRowContext(ctx, query)
+
+	var status ReplicaStatus
+
+	// Scan the results into the struct fields. The order of fields must
+	// match the order of columns in the query result.
+	// You must list ALL columns, even if you don't use them.
+	// This is a limitation of SHOW REPLICA STATUS and rows.Scan().
+	var ignored any // Used to scan columns you don't care about.
+
+	err := row.Scan(
+		&ignored, // Slave_IO_State
+		&status.MasterHost,
+		&status.MasterUser,
+		&status.MasterPort,
+		&ignored, // Connect_Retry
+		&ignored, // Master_Log_File
+		&ignored, // Read_Master_Log_Pos
+		&ignored, // Relay_Log_File
+		&ignored, // Relay_Log_Pos
+		&ignored, // Relay_Master_Log_File
+		&status.SlaveIORunning,
+		&status.SlaveSQLRunning,
+		&ignored,          // Replicate_Do_DB
+		&ignored,          // Replicate_Ignore_DB
+		&ignored,          // Replicate_Do_Table
+		&ignored,          // Replicate_Ignore_Table
+		&ignored,          // Replicate_Wild_Do_Table
+		&ignored,          // Replicate_Wild_Ignore_Table
+		&ignored,          // Last_Errno
+		&status.LastError, // Note: Last_Error in output, maps to LastSQLError in struct
+		&ignored,          // Skip_Counter
+		&ignored,          // Exec_Master_Log_Pos
+		&ignored,          // Relay_Log_Space
+		&ignored,          // Until_Condition
+		&ignored,          // Until_Log_File
+		&ignored,          // Until_Log_Pos
+		&ignored,          // Master_SSL_Allowed
+		&ignored,          // Master_SSL_CA_File
+		&ignored,          // Master_SSL_CA_Path
+		&ignored,          // Master_SSL_Cert
+		&ignored,          // Master_SSL_Cipher
+		&ignored,          // Master_SSL_Key
+		&status.SecondsBehindMaster,
+		&ignored,             // Master_SSL_Verify_Server_Cert
+		&status.LastIOErrno,  // Last_IO_Errno
+		&status.LastIOError,  // Note: Last_IO_Error in output, maps to LastIOError in struct
+		&status.LastSQLErrno, // Last_SQL_Errno
+		&status.LastSQLError, // Last_SQL_Error
+		&ignored,             // Replicate_Ignore_Server_Ids
+		&ignored,             // Master_Server_Id
+		&ignored,             // Master_SSL_Crl
+		&ignored,             // Master_SSL_Crlpath
+		&ignored,             // Using_Gtid
+		&ignored,             // Gtid_IO_Pos
+		&ignored,             // Replicate_Do_Domain_Ids
+		&ignored,             // Replicate_Ignore_Domain_Ids
+		&ignored,             // Parallel_Mode
+		&ignored,             // SQL_Delay
+		&ignored,             // SQL_Remaining_Delay
+		&ignored,             // Slave_SQL_Running_State
+		&ignored,             // Slave_DDL_Groups
+		&ignored,             // Slave_Non_Transactional_Groups
+		&ignored,             // Slave_Transactional_Groups
+		&ignored,             // Replicate_Rewrite_DB
+	)
+
+	if err != nil {
+		// If no rows were returned, it means replication is not configured.
+		if err == sql.ErrNoRows {
+			return status, fmt.Errorf("replication is not configured: %w", err) // Return nil to indicate not configured.
+		}
+		// Otherwise, it's a real database error.
+		return status, fmt.Errorf("failed to scan replica status: %w", err)
+	}
+
+	return status, nil
+
+}
+
+func (c *Client) IsReplicationHealthy(ctx context.Context) (bool, error) {
+	status, error := c.GetReplicationStatus(ctx)
+
+	if error != nil {
+		return false, error
+	}
+
+	if status.SlaveIORunning == "Yes" && status.SlaveSQLRunning == "Yes" {
+		return true, nil
+	}
+
+	if (status.SlaveIORunning == "Preparing" || status.SlaveIORunning == "Connecting") &&
+		status.SlaveSQLRunning == "Yes" {
+		return true, nil
+	}
+
+	return false, nil
+
 }
 
 func (c *Client) ResetSlavePos(ctx context.Context) error {

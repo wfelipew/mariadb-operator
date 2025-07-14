@@ -12,6 +12,7 @@ import (
 	conditions "github.com/mariadb-operator/mariadb-operator/pkg/condition"
 	"github.com/mariadb-operator/mariadb-operator/pkg/controller/replication"
 	podpkg "github.com/mariadb-operator/mariadb-operator/pkg/pod"
+	"github.com/mariadb-operator/mariadb-operator/pkg/sql"
 	stspkg "github.com/mariadb-operator/mariadb-operator/pkg/statefulset"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -121,7 +122,20 @@ func (r *MariaDBReconciler) getReplicationStatus(ctx context.Context,
 		if masterEnabled {
 			state = mariadbv1alpha1.ReplicationStateMaster
 		} else if slaveEnabled {
-			state = mariadbv1alpha1.ReplicationStateSlave
+			replicationHealthy, _ := client.IsReplicationHealthy(ctx)
+			replicationStatus, _ := client.GetReplicationStatus(ctx)
+
+			if replicationHealthy {
+				state = mariadbv1alpha1.ReplicationStateSlave
+			} else {
+
+				if IsReplicationPermanentBroken(replicationStatus) {
+					state = mariadbv1alpha1.ReplicationStateSlavePermanentBroken
+				} else {
+					state = mariadbv1alpha1.ReplicationStateSlaveBroken
+				}
+			}
+
 		}
 		replicationStatus[pod] = state
 	}
@@ -243,4 +257,23 @@ func setMaxScalePrimary(mdb *mariadbv1alpha1.MariaDB, podIndex *int) {
 	}
 	mdb.Status.CurrentPrimaryPodIndex = podIndex
 	mdb.Status.CurrentPrimary = ptr.To(stspkg.PodName(mdb.ObjectMeta, *podIndex))
+}
+
+func IsReplicationPermanentBroken(status sql.ReplicaStatus) bool {
+
+	// Requested GTID is not present on the Master binlog
+	if status.SlaveIORunning == "No" && status.LastIOErrno.Int32 == 1236 {
+		return true
+	}
+
+	// SlaveSQLRunning="No" with SlaveIORunning="Yes" usually means
+	// issues with data consistency.
+	if status.SlaveSQLRunning == "No" &&
+		status.SlaveIORunning == "Yes" &&
+		status.LastSQLError.String != "" {
+		return true
+	}
+
+	return false
+
 }

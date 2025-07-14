@@ -3,6 +3,8 @@ package replication
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
 
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/api/v1alpha1"
 	"github.com/mariadb-operator/mariadb-operator/pkg/builder"
@@ -14,6 +16,7 @@ import (
 	sqlClient "github.com/mariadb-operator/mariadb-operator/pkg/sql"
 	"github.com/mariadb-operator/mariadb-operator/pkg/statefulset"
 	"github.com/mariadb-operator/mariadb-operator/pkg/version"
+	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -89,7 +92,11 @@ func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *maria
 		return fmt.Errorf("error enabling read_only: %v", err)
 	}
 
-	if isExternalReplication {
+	isReplicationConfigured, _ := client.IsReplicationConfigured(ctx)
+
+	// return fmt.Errorf("REPLICATION ALREADY configured :%v ", val)
+
+	if isExternalReplication && !isReplicationConfigured {
 
 		// Get external mariadb
 		emdb, err := r.refResolver.ExternalMariaDB(ctx, &replication.ReplicaFromExternal.MariaDBRef, mariadb.Namespace)
@@ -101,50 +108,20 @@ func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *maria
 			Namespace: emdb.Namespace,
 		}
 		// Check if a viable backup already exists
+		var isBackupInvalid bool = false
+		var binlogExpireLogsDuration time.Duration
 		var existingBackup mariadbv1alpha1.Backup
+
+		if binlogExpireLogsDuration, err = getBinlogExpireLogsDuration(emdb, ctx, r.refResolver); err != nil {
+			return fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+		}
 		err = r.Get(ctx, key, &existingBackup)
-
+		if err == nil {
+			isBackupInvalid = invalidateBackup(existingBackup, ctx, binlogExpireLogsDuration, *r)
+		}
 		// Create a new backup if required
-		if err != nil {
-			backupOps := builder.BackupOpts{
-				Metadata: []*mariadbv1alpha1.Metadata{emdb.Spec.InheritMetadata},
-				Key:      key,
-				MariaDBRef: mariadbv1alpha1.MariaDBRef{
-					ObjectReference: mariadbv1alpha1.ObjectReference{
-						Name: emdb.Name,
-					},
-					Kind: mariadbv1alpha1.ExternalMariaDBKind,
-				},
-				Args: []string{
-					"--master-data=1",
-					"--gtid",
-					"--verbose",
-					"--all-databases",
-					"--single-transaction",
-				},
-				Compression: mariadbv1alpha1.CompressGzip,
-				Storage: mariadbv1alpha1.BackupStorage{
-					PersistentVolumeClaim: &mariadbv1alpha1.PersistentVolumeClaimSpec{
-						AccessModes: []corev1.PersistentVolumeAccessMode{
-							corev1.ReadWriteOnce,
-						},
-						Resources: v1.VolumeResourceRequirements{
-							Requests: v1.ResourceList{
-								"storage": resource.MustParse("5Gi"),
-							},
-						},
-					},
-				},
-			}
-
-			backup, err := r.builder.BuildBackup(backupOps, emdb)
-			if err != nil {
-				return fmt.Errorf("erro building Backup object: %v", err)
-			}
-			if err := r.Create(ctx, backup); err != nil {
-				return fmt.Errorf("error creating base Backup: %v", err)
-			}
-			return nil
+		if err != nil || isBackupInvalid {
+			return newBackup(emdb, *r, ctx, binlogExpireLogsDuration)
 		}
 
 		if !existingBackup.IsComplete() {
@@ -175,6 +152,10 @@ func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *maria
 			// 	return fmt.Errorf("error creating Restore object: %v", err)
 			// }
 			// return nil
+		}
+
+		if err := r.Delete(ctx, &existingRestore); err != nil {
+			return fmt.Errorf("error deleting Restore: %v", err)
 		}
 
 	}
@@ -433,6 +414,95 @@ func newRestore(mariadb *mariadbv1alpha1.MariaDB, r ReplicationConfig, ctx conte
 	}
 	return fmt.Errorf("CREATING Restore object: %v", restore.Name)
 	// return nil
+}
+
+func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r ReplicationConfig, ctx context.Context,
+	binlogExpireLogsDuration time.Duration) error {
+
+	key := types.NamespacedName{
+		Name:      emdb.Name,
+		Namespace: emdb.Namespace,
+	}
+	backupOps := builder.BackupOpts{
+		Metadata: []*mariadbv1alpha1.Metadata{emdb.Spec.InheritMetadata},
+		Key:      key,
+		MariaDBRef: mariadbv1alpha1.MariaDBRef{
+			ObjectReference: mariadbv1alpha1.ObjectReference{
+				Name: emdb.Name,
+			},
+			Kind: mariadbv1alpha1.ExternalMariaDBKind,
+		},
+		Args: []string{
+			"--master-data=1",
+			"--gtid",
+			"--verbose",
+			"--all-databases",
+			"--single-transaction",
+			"--ignore-table=mysql.global_priv",
+		},
+		Compression: mariadbv1alpha1.CompressGzip,
+		Storage: mariadbv1alpha1.BackupStorage{
+			PersistentVolumeClaim: &mariadbv1alpha1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{
+					corev1.ReadWriteOnce,
+				},
+				Resources: v1.VolumeResourceRequirements{
+					Requests: v1.ResourceList{
+						"storage": resource.MustParse("5Gi"),
+					},
+				},
+			},
+		},
+		MaxRetention: binlogExpireLogsDuration,
+	}
+
+	backup, err := r.builder.BuildBackup(backupOps, emdb)
+	if err != nil {
+		return fmt.Errorf("erro building Backup object: %v", err)
+	}
+	if err := r.Create(ctx, backup); err != nil {
+		return fmt.Errorf("error creating base Backup: %v", err)
+	}
+	return nil
+}
+
+func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx context.Context,
+	refResolver *refresolver.RefResolver) (time.Duration, error) {
+	var external_client *sql.Client
+	var err error
+	if external_client, err = sqlClient.NewClientWithMariaDB(ctx, emdb, refResolver); err != nil {
+		return time.Duration(0), fmt.Errorf("erro getting external MariaDB client: %v", err)
+	}
+
+	var binlogExpireLogsSecondsStr string
+	var binlogExpireLogsSeconds int
+
+	if semver.Compare(emdb.Status.Version, "10.6.1") >= 0 {
+		binlogExpireLogsSecondsStr, err = external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
+		if err != nil {
+			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+		}
+		binlogExpireLogsSeconds, _ = strconv.Atoi(binlogExpireLogsSecondsStr)
+	} else {
+		binlogExpireLogsDaysStr, err := external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
+		if err != nil {
+			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+		}
+		binlogExpireLogsDays, _ := strconv.Atoi(binlogExpireLogsDaysStr)
+		binlogExpireLogsSeconds = binlogExpireLogsDays * 86400
+	}
+
+	return time.Duration(binlogExpireLogsSeconds) * time.Second, nil
+}
+
+func invalidateBackup(existingBackup mariadbv1alpha1.Backup, ctx context.Context,
+	binlogExpireLogsDuration time.Duration, r ReplicationConfig) bool {
+	if time.Since(existingBackup.CreationTimestamp.Time) > binlogExpireLogsDuration {
+		if err := r.Delete(ctx, &existingBackup); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func newReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB) mariadbv1alpha1.GeneratedSecretKeyRef {

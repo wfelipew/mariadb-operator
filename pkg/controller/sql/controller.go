@@ -122,6 +122,8 @@ func (r *SqlReconciler) Reconcile(ctx context.Context, resource Resource) (ctrl.
 	}
 	defer mdbClient.Close()
 
+	//mdbInternalClient, err := sqlClient.NewInternalClientWithPodIndex(ctx, mariadb, r.RefResolver, podIndex)
+
 	err = r.WrappedReconciler.Reconcile(ctx, mdbClient)
 	var errBundle *multierror.Error
 	errBundle = multierror.Append(errBundle, err)

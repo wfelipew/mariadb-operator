@@ -319,9 +319,11 @@ func (m *MariaDB) IsSwitchingPrimary() bool {
 type ReplicationState string
 
 const (
-	ReplicationStateMaster        ReplicationState = "Master"
-	ReplicationStateSlave         ReplicationState = "Slave"
-	ReplicationStateNotConfigured ReplicationState = "NotConfigured"
+	ReplicationStateMaster               ReplicationState = "Master"
+	ReplicationStateSlave                ReplicationState = "Slave"
+	ReplicationStateSlaveBroken          ReplicationState = "SlaveBroken"
+	ReplicationStateSlavePermanentBroken ReplicationState = "SlavePermanentBroken"
+	ReplicationStateNotConfigured        ReplicationState = "NotConfigured"
 )
 
 type ReplicationStatus map[string]ReplicationState

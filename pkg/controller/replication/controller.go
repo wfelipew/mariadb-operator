@@ -14,6 +14,7 @@ import (
 	"github.com/mariadb-operator/mariadb-operator/pkg/health"
 	"github.com/mariadb-operator/mariadb-operator/pkg/refresolver"
 	"github.com/mariadb-operator/mariadb-operator/pkg/statefulset"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -190,11 +191,44 @@ func (r *ReplicationReconciler) reconcileReplication(ctx context.Context, req *r
 		}
 
 		state, ok := req.mariadb.Status.ReplicationStatus[pod]
-		if !ok || state == mariadbv1alpha1.ReplicationStateNotConfigured {
+		if !ok || state == mariadbv1alpha1.ReplicationStateNotConfigured ||
+			state == mariadbv1alpha1.ReplicationStateSlaveBroken {
 			if err := r.reconcileReplicationInPod(ctx, req, logger, i); err != nil {
 				return ctrl.Result{}, fmt.Errorf("error configuring replication in Pod '%s': %v", pod, err)
 			}
 		}
+
+		// Delete POD if it is a permanent issue
+		if state == mariadbv1alpha1.ReplicationStateSlavePermanentBroken && isExternalReplication {
+
+			// Delete PVC
+			key := types.NamespacedName{
+				Name:      fmt.Sprintf("storage-%s-%d", req.mariadb.Name, i),
+				Namespace: req.mariadb.Namespace,
+			}
+			var existingPvc corev1.PersistentVolumeClaim
+			if err := r.Get(ctx, key, &existingPvc); err != nil {
+				return ctrl.Result{}, fmt.Errorf("error getting pvc from Pod '%s': %v", pod, err)
+			}
+			if err := r.Delete(ctx, &existingPvc); err != nil {
+				return ctrl.Result{}, fmt.Errorf("error deleting pvc from Pod '%s': %v", pod, err)
+			}
+
+			// Delete POD
+			key = types.NamespacedName{
+				Name:      fmt.Sprintf("%s-%d", req.mariadb.Name, i),
+				Namespace: req.mariadb.Namespace,
+			}
+			var existingPod corev1.Pod
+			if err := r.Get(ctx, key, &existingPod); err != nil {
+				return ctrl.Result{}, fmt.Errorf("error getting Pod '%s': %v", pod, err)
+			}
+			if err := r.Delete(ctx, &existingPod); err != nil {
+				return ctrl.Result{}, fmt.Errorf("error deleting Pod '%s': %v", pod, err)
+			}
+
+		}
+
 	}
 	return ctrl.Result{}, nil
 }

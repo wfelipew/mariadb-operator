@@ -24,6 +24,7 @@ type TLSAwareInterface interface {
 type ReplicationAwareInterface interface {
 	GetReplicas() int32
 	IsHAEnabled() bool
+	Replication() mariadbv1alpha1.Replication
 }
 
 type ConnectionParamsAwareInterface interface {

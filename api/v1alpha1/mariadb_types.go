@@ -1165,6 +1165,11 @@ func (m *ExternalMariaDB) IsGaleraEnabled() bool {
 	return false
 }
 
+// Replication with defaulting accessor
+func (m *ExternalMariaDB) Replication() Replication {
+	return Replication{}
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:shortName=emdb
 // +kubebuilder:subresource:status
