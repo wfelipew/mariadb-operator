@@ -149,11 +149,6 @@ type ReplicaFromExternal struct {
 	// +kubebuilder:validation:Enum=CurrentPos;SlavePos
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	Gtid *Gtid `json:"gtid,omitempty"`
-	// // ReplPasswordSecretKeyRef provides a reference to the Secret to use as password for the replication user.
-	// // +optional
-	// // +operator-sdk:csv:customresourcedefinitions:type=spec
-	// ReplPasswordSecretKeyRef *GeneratedSecretKeyRef `json:"replPasswordSecretKeyRef,omitempty"`
-
 	// ConnectionTimeout to be used when the replica connects to the primary.
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
@@ -165,8 +160,15 @@ type ReplicaFromExternal struct {
 	// // SyncTimeout defines the timeout for a replica to be synced with the primary when performing a primary switchover.
 	// // If the timeout is reached, the replica GTID will be reset and the switchover will continue.
 	// // +optional
-	// // +operator-sdk:csv:customresourcedefinitions:type=spec
-	// SyncTimeout *metav1.Duration `json:"syncTimeout,omitempty"`
+	// // +operator-sdk:csv:customresourcedefinitions:type=spe
+	// HealthCheckInterval to be used when the replica connects to the primary.
+	// +optional
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:number"}
+	HealthCheckInterval *metav1.Duration `json:"healthCheckInterval,omitempty"`
+	// ServerIdOffset to be used on the replicas.
+	// +optional
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	ServerIdOffset *int `json:"serverIdOffset,omitempty"`
 }
 
 // FillWithDefaults fills the current ReplicaReplication object with DefaultReplicationSpec.
@@ -262,6 +264,9 @@ func (r *ReplicationSpec) FillWithDefaults() {
 	} else {
 		r.Replica.FillWithDefaults()
 	}
+	if r.ReplicaFromExternal != nil {
+		r.ReplicaFromExternal.FillWithDefaults()
+	}
 	if r.SyncBinlog == nil {
 		syncBinlog := *DefaultReplicationSpec.SyncBinlog
 		r.SyncBinlog = &syncBinlog
@@ -269,6 +274,19 @@ func (r *ReplicationSpec) FillWithDefaults() {
 	if r.ProbesEnabled == nil {
 		probesEnabled := *DefaultReplicationSpec.ProbesEnabled
 		r.ProbesEnabled = &probesEnabled
+	}
+}
+
+// FillWithDefaults fills the current ReplicationSpec object with DefaultReplicationSpec.
+// This enables having minimal ReplicationSpec objects and provides sensible defaults.
+func (r *ReplicaFromExternal) FillWithDefaults() {
+	if r.HealthCheckInterval == nil {
+		r.HealthCheckInterval = &metav1.Duration{
+			Duration: 15 * time.Second,
+		}
+	}
+	if r.ServerIdOffset == nil {
+		r.ServerIdOffset = ptr.To(0)
 	}
 }
 

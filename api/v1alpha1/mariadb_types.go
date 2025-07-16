@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -844,7 +845,7 @@ type MariaDB struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// +kubebuilder:validation:XValidation:rule="self.replicas %2 == 1 || self.replicasAllowEvenNumber", message="An odd number of MariaDB instances (mariadb.spec.replicas) is required to avoid split brain situations. Use 'mariadb.spec.replicasAllowEvenNumber: true' to disable this validation."
+	// +kubebuilder:validation:XValidation:rule="self.replicas %2 == 1 || self.replicasAllowEvenNumber || has(self.replication.replicaFromExternal)", message="An odd number of MariaDB instances (mariadb.spec.replicas) is required to avoid split brain situations. Use 'mariadb.spec.replicasAllowEvenNumber: true' to disable this validation."
 	Spec   MariaDBSpec   `json:"spec"`
 	Status MariaDBStatus `json:"status,omitempty"`
 }
@@ -1121,6 +1122,11 @@ func (m *MariaDB) GetPodHost(podIndex int) string {
 	)
 }
 
+// Get MariaDB Object Meta
+func (m *MariaDB) GetObjectMeta() *v1.ObjectMeta {
+	return &m.ObjectMeta
+}
+
 // Get MariaDB port
 func (m *MariaDB) GetPort() int32 {
 	return m.Spec.Port
@@ -1198,6 +1204,11 @@ func (m *ExternalMariaDB) SetDefaults(env *environment.OperatorEnv) error {
 	}
 
 	return nil
+}
+
+// Get MariaDB Object Meta
+func (m *ExternalMariaDB) GetObjectMeta() *v1.ObjectMeta {
+	return &m.ObjectMeta
 }
 
 // IsReady indicates whether the External MariaDB instance is ready

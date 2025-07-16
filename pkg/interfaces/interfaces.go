@@ -3,6 +3,7 @@ package interfaces
 import (
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientpkg "sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,6 +28,10 @@ type ReplicationAwareInterface interface {
 	Replication() mariadbv1alpha1.Replication
 }
 
+type ServiceAwareInterface interface {
+	InternalServiceKey() types.NamespacedName
+}
+
 type ConnectionParamsAwareInterface interface {
 	GetHost() string
 	GetPodHost(podIndex int) string
@@ -45,7 +50,9 @@ type MariaDBGenericInterface interface {
 	ConnectionParamsAwareInterface
 	GaleraAwareInterface
 	ReplicationAwareInterface
+	ServiceAwareInterface
 	runtime.Object
 	IsReady() bool
+	GetObjectMeta() *v1.ObjectMeta
 	clientpkg.Object
 }

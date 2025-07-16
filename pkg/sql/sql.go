@@ -225,12 +225,12 @@ func NewClientWithMariaDB(ctx context.Context, mariadb interfaces.MariaDBGeneric
 	return NewClient(opts...)
 }
 
-func NewInternalClientWithPodIndex(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB, refResolver *refresolver.RefResolver,
+func NewInternalClientWithPodIndex(ctx context.Context, mariadb interfaces.MariaDBGenericInterface, refResolver *refresolver.RefResolver,
 	podIndex int, clientOpts ...Opt) (*Client, error) {
 	opts := []Opt{
 		WitHost(
 			statefulset.PodFQDNWithService(
-				mariadb.ObjectMeta,
+				*mariadb.GetObjectMeta(),
 				podIndex,
 				mariadb.InternalServiceKey().Name,
 			),
@@ -919,7 +919,7 @@ func (c *Client) IsReplicationHealthy(ctx context.Context) (bool, error) {
 	}
 
 	if (status.SlaveIORunning == "Preparing" || status.SlaveIORunning == "Connecting") &&
-		status.SlaveSQLRunning == "Yes" {
+		status.LastIOErrno.Int32 == 0 {
 		return true, nil
 	}
 

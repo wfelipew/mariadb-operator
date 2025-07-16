@@ -174,6 +174,7 @@ func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *maria
 
 func (r *ReplicationConfig) configurePrimaryVars(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB, client *sqlClient.Client,
 	primaryPodIndex int) error {
+
 	kv := map[string]string{
 		"sync_binlog":                  binaryFromBool(mariadb.Replication().SyncBinlog),
 		"rpl_semi_sync_master_enabled": "ON",
@@ -198,11 +199,20 @@ func (r *ReplicationConfig) configurePrimaryVars(ctx context.Context, mariadb *m
 
 func (r *ReplicationConfig) configureReplicaVars(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
 	client *sqlClient.Client, ordinal int) error {
+	var server_id string
+
+	if mariadb.Replication().ReplicaFromExternal != nil {
+		server_id = offsetServerId(ordinal, *mariadb.Replication().ReplicaFromExternal.ServerIdOffset)
+
+	} else {
+		server_id = serverId(ordinal)
+	}
+
 	kv := map[string]string{
 		"sync_binlog":                  binaryFromBool(mariadb.Replication().SyncBinlog),
 		"rpl_semi_sync_master_enabled": "OFF",
 		"rpl_semi_sync_slave_enabled":  "ON",
-		"server_id":                    serverId(ordinal),
+		"server_id":                    server_id,
 	}
 	if err := client.SetSystemVariables(ctx, kv); err != nil {
 		return fmt.Errorf("error setting replication vars: %v", err)
@@ -544,6 +554,10 @@ func externalReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB, r *refresolver.Re
 
 func serverId(index int) string {
 	return fmt.Sprint(10 + index)
+}
+
+func offsetServerId(index int, offset int) string {
+	return fmt.Sprint(offset + index)
 }
 
 func binaryFromBool(b *bool) string {

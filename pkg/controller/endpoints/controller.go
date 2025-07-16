@@ -96,11 +96,12 @@ func (r *EndpointsReconciler) endpoints(ctx context.Context, key types.Namespace
 		if err != nil {
 			return nil, fmt.Errorf("error getting Pod '%s' index: %v", pod.Name, err)
 		}
-		if *podIndex == *mariadb.Status.CurrentPrimaryPodIndex {
+		if *podIndex == *mariadb.Status.CurrentPrimaryPodIndex && mariadb.Replication().ReplicaFromExternal == nil {
 			continue
 		}
 
-		if mdbpod.PodReady(&pod) {
+		if mdbpod.PodReady(&pod) && (mariadb.Status.ReplicationStatus[pod.Name] == mariadbv1alpha1.ReplicationStateSlave ||
+			mariadb.Status.ReplicationStatus[pod.Name] == mariadbv1alpha1.ReplicationStateSlaveBroken) {
 			addresses = append(addresses, *addr)
 		} else {
 			notReadyAddresses = append(notReadyAddresses, *addr)

@@ -65,6 +65,14 @@ func (m *MariaDB) TLSCABundleSecretKeyRef() SecretKeySelector {
 	}
 }
 
+// InternalServiceKey defines the key for the internal headless Service
+func (m *ExternalMariaDB) InternalServiceKey() types.NamespacedName {
+	return types.NamespacedName{
+		Name:      "",
+		Namespace: m.Namespace,
+	}
+}
+
 // TLSCABundleSecretKeyRef defines the key selector for the TLS Secret trust bundle
 func (m *ExternalMariaDB) TLSCABundleSecretKeyRef() SecretKeySelector {
 

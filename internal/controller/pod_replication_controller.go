@@ -58,12 +58,9 @@ func (r *PodReplicationController) ReconcilePodNotReady(ctx context.Context, pod
 	if err != nil {
 		return fmt.Errorf("error getting Pod index: %v", err)
 	}
+
 	if *index != *mariadb.Status.CurrentPrimaryPodIndex {
 		return nil
-	}
-
-	if mariadb.Replication().ReplicaFromExternal != nil {
-		return fmt.Errorf("error External Replication not ready")
 	}
 
 	fromIndex := mariadb.Status.CurrentPrimaryPodIndex

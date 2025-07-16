@@ -4914,6 +4914,14 @@ spec:
                         - CurrentPos
                         - SlavePos
                         type: string
+                      healthCheckInterval:
+                        description: |-
+                          // SyncTimeout defines the timeout for a replica to be synced with the primary when performing a primary switchover.
+                          // If the timeout is reached, the replica GTID will be reset and the switchover will continue.
+                          // +optional
+                          // +operator-sdk:csv:customresourcedefinitions:type=spe
+                          HealthCheckInterval to be used when the replica connects to the primary.
+                        type: string
                       mariaDbRef:
                         description: MariaDBRef is a reference to a MariaDB object.
                         properties:
@@ -4930,6 +4938,9 @@ spec:
                               using this reference should wait for MariaDB to be ready.
                             type: boolean
                         type: object
+                      serverIdOffset:
+                        description: ServerIdOffset to be used on the replicas.
+                        type: integer
                     required:
                     - mariaDbRef
                     type: object
@@ -5944,7 +5955,7 @@ spec:
             - message: 'An odd number of MariaDB instances (mariadb.spec.replicas)
                 is required to avoid split brain situations. Use ''mariadb.spec.replicasAllowEvenNumber:
                 true'' to disable this validation.'
-              rule: self.replicas %2 == 1 || self.replicasAllowEvenNumber
+              rule: self.replicas %2 == 1 || self.replicasAllowEvenNumber || has(self.replication.replicaFromExternal)
           status:
             description: MariaDBStatus defines the observed state of MariaDB
             properties:

@@ -53,6 +53,11 @@ func (r *MariaDBReconciler) reconcileStatus(ctx context.Context, mdb *mariadbv1a
 		logger.Info("error getting TLS status", "err", err)
 	}
 
+	// var result ctrl.Result
+	// if mdb.Replication().ReplicaFromExternal != nil {
+	// 	result = ctrl.Result{RequeueAfter: mdb.Replication().ReplicaFromExternal.HealthCheckInterval.Duration}
+	// }
+
 	return ctrl.Result{}, r.patchStatus(ctx, mdb, func(status *mariadbv1alpha1.MariaDBStatus) error {
 		status.DefaultVersion = r.Environment.MariadbDefaultVersion
 		status.Replicas = sts.Status.ReadyReplicas
@@ -85,6 +90,8 @@ func (r *MariaDBReconciler) reconcileStatus(ctx context.Context, mdb *mariadbv1a
 
 func (r *MariaDBReconciler) getReplicationStatus(ctx context.Context,
 	mdb *mariadbv1alpha1.MariaDB) (mariadbv1alpha1.ReplicationStatus, error) {
+	logger := log.FromContext(ctx)
+	logger.V(1).Info("####### getReplicationStatus #########")
 	if !mdb.Replication().Enabled {
 		return nil, nil
 	}
@@ -96,7 +103,7 @@ func (r *MariaDBReconciler) getReplicationStatus(ctx context.Context,
 	defer clientSet.Close()
 
 	replicationStatus := make(mariadbv1alpha1.ReplicationStatus)
-	logger := log.FromContext(ctx)
+
 	for i := 0; i < int(mdb.Spec.Replicas); i++ {
 		pod := stspkg.PodName(mdb.ObjectMeta, i)
 
