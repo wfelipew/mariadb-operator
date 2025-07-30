@@ -422,8 +422,8 @@ func newRestore(mariadb *mariadbv1alpha1.MariaDB, r ReplicationConfig, ctx conte
 	if err := r.Create(ctx, restore); err != nil {
 		return fmt.Errorf("error creating Restore object: %v", err)
 	}
-	return fmt.Errorf("CREATING Restore object: %v", restore.Name)
-	// return nil
+	// return fmt.Errorf("CREATING Restore object: %v", restore.Name)
+	return nil
 }
 
 func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r ReplicationConfig, ctx context.Context,
@@ -481,8 +481,9 @@ func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx cont
 	var external_client *sql.Client
 	var err error
 	if external_client, err = sqlClient.NewClientWithMariaDB(ctx, emdb, refResolver); err != nil {
-		return time.Duration(0), fmt.Errorf("erro getting external MariaDB client: %v", err)
+		return time.Duration(0), fmt.Errorf("error getting external MariaDB client: %v", err)
 	}
+	defer external_client.Close()
 
 	var binlogExpireLogsSecondsStr string
 	var binlogExpireLogsSeconds int

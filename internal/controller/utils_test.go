@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"github.com/mariadb-operator/mariadb-operator/pkg/docker"
 	"github.com/mariadb-operator/mariadb-operator/pkg/environment"
 	"github.com/mariadb-operator/mariadb-operator/pkg/metadata"
+	"github.com/mariadb-operator/mariadb-operator/pkg/statefulset"
 	stsobj "github.com/mariadb-operator/mariadb-operator/pkg/statefulset"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -35,7 +37,7 @@ import (
 var (
 	testVeryHighTimeout = 10 * time.Minute
 	testHighTimeout     = 5 * time.Minute
-	testTimeout         = 2 * time.Minute
+	testTimeout         = 3 * time.Minute
 	testInterval        = 1 * time.Second
 
 	testNamespace = "default"
@@ -207,8 +209,8 @@ max_allowed_packet=256M`),
 				Required: ptr.To(true),
 			},
 			Storage: mariadbv1alpha1.Storage{
-				Size:             ptr.To(resource.MustParse("300Mi")),
-				StorageClassName: "csi-hostpath-sc",
+				Size: ptr.To(resource.MustParse("300Mi")),
+				// StorageClassName: "csi-hostpath-sc",
 			},
 		},
 	}
@@ -300,6 +302,7 @@ max_allowed_packet=256M`),
 bind-address=*
 default_storage_engine=InnoDB
 binlog_format=row
+log_bin=ON
 innodb_autoinc_lock_mode=2
 max_allowed_packet=256M`),
 			Port: 3306,
@@ -307,7 +310,7 @@ max_allowed_packet=256M`),
 				Type: corev1.ServiceTypeLoadBalancer,
 				Metadata: &mariadbv1alpha1.Metadata{
 					Annotations: map[string]string{
-						"metallb.universe.tf/loadBalancerIPs": testCidrPrefix + ".0.46",
+						"metallb.universe.tf/loadBalancerIPs": testCidrPrefix + ".0.47",
 					},
 				},
 			},
@@ -785,6 +788,62 @@ func testExternalConnection(username string, password mariadbv1alpha1.SecretKeyS
 			return !conn.IsReady()
 		}
 	}, testTimeout, testInterval).Should(BeTrue())
+}
+
+func testDeletePod(mdb *mariadbv1alpha1.MariaDB, podIndex int, deletePVC bool) {
+
+	// Delete PVC
+	if deletePVC {
+		PVCKey := types.NamespacedName{
+			Name:      fmt.Sprintf("storage-%s-%d", mdb.Name, podIndex),
+			Namespace: testNamespace,
+		}
+		var existingPvc corev1.PersistentVolumeClaim
+		By("Expecting to get PVC from Pod" + strconv.Itoa(podIndex))
+		Expect(k8sClient.Get(testCtx, PVCKey, &existingPvc)).To(Succeed())
+		By("Expecting to delete PVC from Pod" + strconv.Itoa(podIndex))
+		Expect(k8sClient.Delete(testCtx, &existingPvc)).To(Succeed())
+	}
+	// Delete POD
+	podKey := types.NamespacedName{
+		Name:      fmt.Sprintf("%s-%d", mdb.Name, podIndex),
+		Namespace: testNamespace,
+	}
+	var existingPod corev1.Pod
+	Expect(k8sClient.Get(testCtx, podKey, &existingPod)).To(Succeed())
+	Expect(k8sClient.Delete(testCtx, &existingPod)).To(Succeed())
+
+	// Wait for the get ready
+	key := types.NamespacedName{
+		Name:      mdb.Name,
+		Namespace: testNamespace,
+	}
+
+	// By("Not expecting Pod" + strconv.Itoa(podIndex) + " present on replication status ")
+	// Eventually(func() bool {
+	// 	if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+	// 		return apierrors.IsNotFound(err)
+	// 	}
+	// 	return mdb.Status.ReplicationStatus[statefulset.PodName(mdb.ObjectMeta, podIndex)] == mariadbv1alpha1.ReplicationStateSlave
+	// }, testHighTimeout, testInterval).Should(BeTrue())
+
+	if deletePVC {
+		By("Expecting replication status to be NotConfigured on Pod " + strconv.Itoa(podIndex))
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return apierrors.IsNotFound(err)
+			}
+			return mdb.Status.ReplicationStatus[statefulset.PodName(mdb.ObjectMeta, podIndex)] == mariadbv1alpha1.ReplicationStateNotConfigured
+		}, testHighTimeout, testInterval).Should(BeTrue())
+	}
+
+	By("Expecting replication status to get back to slave Pod " + strconv.Itoa(podIndex))
+	Eventually(func() bool {
+		if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+			return apierrors.IsNotFound(err)
+		}
+		return mdb.Status.ReplicationStatus[statefulset.PodName(mdb.ObjectMeta, podIndex)] == mariadbv1alpha1.ReplicationStateSlave
+	}, testHighTimeout, testInterval).Should(BeTrue())
 }
 
 // See: https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories

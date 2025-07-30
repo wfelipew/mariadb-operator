@@ -1,15 +1,19 @@
 package controller
 
 import (
+	"strconv"
 	"time"
 
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/api/v1alpha1"
+	"github.com/mariadb-operator/mariadb-operator/pkg/refresolver"
+	sqlClient "github.com/mariadb-operator/mariadb-operator/pkg/sql"
 	"github.com/mariadb-operator/mariadb-operator/pkg/statefulset"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -375,4 +379,555 @@ var _ = Describe("MariaDB replication", Ordered, func() {
 		By("Using MariaDB with MaxScale")
 		testMaxscale(mdb, mxs)
 	})
+})
+
+var _ = Describe("MariaDB replication from external server", Ordered, func() {
+
+	var (
+		key = types.NamespacedName{
+			Name:      "mariadb-repl-external",
+			Namespace: testNamespace,
+		}
+		mdb *mariadbv1alpha1.MariaDB
+	)
+
+	BeforeAll(func() {
+		mdb = &mariadbv1alpha1.MariaDB{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+			},
+			Spec: mariadbv1alpha1.MariaDBSpec{
+				Username: &testUser,
+				PasswordSecretKeyRef: &mariadbv1alpha1.GeneratedSecretKeyRef{
+					SecretKeySelector: mariadbv1alpha1.SecretKeySelector{
+						LocalObjectReference: mariadbv1alpha1.LocalObjectReference{
+							Name: testPwdKey.Name,
+						},
+						Key: testPwdSecretKey,
+					},
+				},
+				Database: &testDatabase,
+				MyCnf: ptr.To(`[mariadb]
+				bind-address=*
+				default_storage_engine=InnoDB
+				binlog_format=row
+				innodb_autoinc_lock_mode=2
+				max_allowed_packet=256M`,
+				),
+				Replication: &mariadbv1alpha1.Replication{
+					ReplicationSpec: mariadbv1alpha1.ReplicationSpec{
+						ReplicaFromExternal: &mariadbv1alpha1.ReplicaFromExternal{
+							MariaDBRef: mariadbv1alpha1.MariaDBRef{
+								ObjectReference: mariadbv1alpha1.ObjectReference{
+									Name: testEMdbkey.Name,
+								},
+								Kind: mariadbv1alpha1.ExternalMariaDBKind,
+							},
+							ServerIdOffset: ptr.To(50),
+						},
+					},
+					Enabled: true,
+				},
+				Replicas: 3,
+				Storage: mariadbv1alpha1.Storage{
+					Size:                ptr.To(resource.MustParse("300Mi")),
+					StorageClassName:    "standard-resize",
+					ResizeInUseVolumes:  ptr.To(true),
+					WaitForVolumeResize: ptr.To(true),
+				},
+				TLS: &mariadbv1alpha1.TLS{
+					Enabled:  true,
+					Required: ptr.To(true),
+				},
+				Service: &mariadbv1alpha1.ServiceTemplate{
+					Type: corev1.ServiceTypeLoadBalancer,
+					Metadata: &mariadbv1alpha1.Metadata{
+						Annotations: map[string]string{
+							"metallb.universe.tf/loadBalancerIPs": testCidrPrefix + ".0.120",
+						},
+					},
+				},
+				Connection: &mariadbv1alpha1.ConnectionTemplate{
+					SecretName: func() *string {
+						s := "mdb-repl-conn"
+						return &s
+					}(),
+					SecretTemplate: &mariadbv1alpha1.SecretTemplate{
+						Key: &testConnSecretKey,
+					},
+				},
+				PrimaryService: &mariadbv1alpha1.ServiceTemplate{
+					Type: corev1.ServiceTypeLoadBalancer,
+					Metadata: &mariadbv1alpha1.Metadata{
+						Annotations: map[string]string{
+							"metallb.universe.tf/loadBalancerIPs": testCidrPrefix + ".0.190",
+						},
+					},
+				},
+				PrimaryConnection: &mariadbv1alpha1.ConnectionTemplate{
+					SecretName: func() *string {
+						s := "mdb-repl-conn-primary"
+						return &s
+					}(),
+					SecretTemplate: &mariadbv1alpha1.SecretTemplate{
+						Key: &testConnSecretKey,
+					},
+				},
+				SecondaryService: &mariadbv1alpha1.ServiceTemplate{
+					Type: corev1.ServiceTypeLoadBalancer,
+					Metadata: &mariadbv1alpha1.Metadata{
+						Annotations: map[string]string{
+							"metallb.universe.tf/loadBalancerIPs": testCidrPrefix + ".0.191",
+						},
+					},
+				},
+				SecondaryConnection: &mariadbv1alpha1.ConnectionTemplate{
+					SecretName: func() *string {
+						s := "mdb-repl-conn-secondary"
+						return &s
+					}(),
+					SecretTemplate: &mariadbv1alpha1.SecretTemplate{
+						Key: &testConnSecretKey,
+					},
+				},
+				UpdateStrategy: mariadbv1alpha1.UpdateStrategy{
+					Type: mariadbv1alpha1.ReplicasFirstPrimaryLastUpdateType,
+				},
+			},
+		}
+		applyMariadbTestConfig(mdb)
+
+		By("Waiting for external MariaDB to be ready")
+		expectExternalMariadbReady(testCtx, k8sClient, testEMdbkey)
+
+		By("Creating MariaDB with replication")
+		Expect(k8sClient.Create(testCtx, mdb)).To(Succeed())
+		DeferCleanup(func() {
+			deleteMariadb(key, false)
+		})
+	})
+
+	It("should reconcile", func() {
+
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting to create a Service")
+		var svc corev1.Service
+		Expect(k8sClient.Get(testCtx, key, &svc)).To(Succeed())
+
+		By("Expecting to create a primary Service")
+		Expect(k8sClient.Get(testCtx, mdb.PrimaryServiceKey(), &svc)).To(Succeed())
+		Expect(svc.Spec.Selector["statefulset.kubernetes.io/pod-name"]).To(Equal(statefulset.PodName(mdb.ObjectMeta, 0)))
+
+		By("Expecting to create a secondary Service")
+		Expect(k8sClient.Get(testCtx, mdb.SecondaryServiceKey(), &svc)).To(Succeed())
+
+		By("Expecting role label to be set to primary")
+		Eventually(func() bool {
+			currentPrimary := *mdb.Status.CurrentPrimary
+			primaryPodKey := types.NamespacedName{
+				Name:      currentPrimary,
+				Namespace: mdb.Namespace,
+			}
+			var primaryPod corev1.Pod
+			if err := k8sClient.Get(testCtx, primaryPodKey, &primaryPod); err != nil {
+				return apierrors.IsNotFound(err)
+			}
+			return primaryPod.Labels["k8s.mariadb.com/role"] == "primary"
+		}, testTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting Connection to be ready eventually")
+		Eventually(func() bool {
+			var conn mariadbv1alpha1.Connection
+			if err := k8sClient.Get(testCtx, key, &conn); err != nil {
+				return false
+			}
+			return conn.IsReady()
+		}, testTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting primary Connection to be ready eventually")
+		Eventually(func() bool {
+			var conn mariadbv1alpha1.Connection
+			if err := k8sClient.Get(testCtx, mdb.PrimaryConnectioneKey(), &conn); err != nil {
+				return false
+			}
+			return conn.IsReady()
+		}, testTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting secondary Connection to be ready eventually")
+		Eventually(func() bool {
+			var conn mariadbv1alpha1.Connection
+			if err := k8sClient.Get(testCtx, mdb.SecondaryConnectioneKey(), &conn); err != nil {
+				return false
+			}
+			return conn.IsReady()
+		}, testTimeout, testInterval).Should(BeTrue())
+		var endpoints corev1.Endpoints
+
+		By("Expecting to create secondary Endpoints: " + strconv.Itoa(int(mdb.Spec.Replicas)))
+		Eventually(func() bool {
+			Expect(k8sClient.Get(testCtx, mdb.SecondaryServiceKey(), &endpoints)).To(Succeed())
+			Expect(endpoints.Subsets).To(HaveLen(1))
+			return len(endpoints.Subsets[0].Addresses) == int(mdb.Spec.Replicas)
+		}, testTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting to create a PodDisruptionBudget")
+		var pdb policyv1.PodDisruptionBudget
+		Expect(k8sClient.Get(testCtx, key, &pdb)).To(Succeed())
+	})
+
+	It("should restart replication if stopped", func() {
+
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting to get SqlClient from Pod 2")
+		refResolver := refresolver.New(k8sClient)
+		var client *sqlClient.Client
+		var err error
+		podIndex := 2
+		client, err = sqlClient.NewInternalClientWithPodIndex(testCtx, mdb, refResolver, podIndex)
+		Expect(err).To(Succeed())
+		defer client.Close()
+
+		By("Expecting to stop replication on Pod 2")
+		Expect(client.Exec(testCtx, "STOP SLAVE")).To(Succeed())
+
+		By("Expecting replication to be ready eventually on Pod " + strconv.Itoa(podIndex))
+		Eventually(func() bool {
+			isReplicaHealthy, _ := client.IsReplicationHealthy(testCtx)
+			return isReplicaHealthy
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting replication status to get back to slave Pod " + strconv.Itoa(podIndex))
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return apierrors.IsNotFound(err)
+			}
+			return mdb.Status.ReplicationStatus[statefulset.PodName(mdb.ObjectMeta, podIndex)] == mariadbv1alpha1.ReplicationStateSlave
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		var endpoints corev1.Endpoints
+		By("Expecting Pod " + strconv.Itoa(podIndex) + " to present on the secondary endpoints")
+		Eventually(func() bool {
+			Expect(k8sClient.Get(testCtx, mdb.SecondaryServiceKey(), &endpoints)).To(Succeed())
+			Expect(endpoints.Subsets).To(HaveLen(1))
+
+			podKey := types.NamespacedName{
+				Name:      statefulset.PodName(mdb.ObjectMeta, podIndex),
+				Namespace: testNamespace,
+			}
+			var pod corev1.Pod
+			Expect(k8sClient.Get(testCtx, podKey, &pod)).To(Succeed())
+
+			for _, address := range endpoints.Subsets[0].Addresses {
+				if address.IP == pod.Status.PodIP {
+					return true
+				}
+			}
+			return false
+		}, testTimeout, testInterval).Should(BeTrue())
+	})
+
+	It("should rebuild Pod and PVC in case of permanent replication issue", func() {
+
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting to get SqlClient from Pod 2")
+		refResolver := refresolver.New(k8sClient)
+		var client *sqlClient.Client
+		var err error
+		podIndex := 2
+		client, err = sqlClient.NewInternalClientWithPodIndex(testCtx, mdb, refResolver, podIndex)
+		Expect(err).To(Succeed())
+		defer client.Close()
+
+		By("Suspend MariaDB")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			mdb.Spec.Suspend = true
+
+			return k8sClient.Update(testCtx, mdb) == nil
+		}, testTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting MariaDB to eventually be suspended")
+		expectMariadbFn(testCtx, k8sClient, key, func(mdb *mariadbv1alpha1.MariaDB) bool {
+			condition := meta.FindStatusCondition(mdb.Status.Conditions, mariadbv1alpha1.ConditionTypeReady)
+			if condition == nil {
+				return false
+			}
+			return condition.Status == metav1.ConditionFalse && condition.Reason == mariadbv1alpha1.ConditionReasonSuspended
+		})
+
+		By("Expecting to stop replication on Pod 2")
+		Expect(client.Exec(testCtx, "STOP SLAVE")).To(Succeed(), client.Exec(testCtx, "SET GLOBAL gtid_slave_pos = '0-9999-9999'"))
+
+		By("Expecting to set Invalid GTID position on Pod 2")
+		Expect(client.Exec(testCtx, "SET GLOBAL gtid_slave_pos = '0-9999-9999'"))
+
+		By("Expecting to start replication on Pod 2")
+		Expect(client.Exec(testCtx, "START SLAVE"))
+
+		By("Expecting replication error 1236 on Pod " + strconv.Itoa(podIndex))
+		Eventually(func() bool {
+			rStatus, err := client.GetReplicationStatus(testCtx)
+			if err != nil {
+				return false
+			}
+
+			return rStatus.LastIOErrno.Int32 == 1236
+
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		By("Resume MariaDB")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			mdb.Spec.Suspend = false
+
+			return k8sClient.Update(testCtx, mdb) == nil
+		}, testTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting no replication error 1236 on Pod " + strconv.Itoa(podIndex))
+		Eventually(func() bool {
+			rStatus, err := client.GetReplicationStatus(testCtx)
+			if err != nil {
+				return false
+			}
+
+			return rStatus.LastIOErrno.Int32 != 1236
+
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting replication status to get back to slave Pod " + strconv.Itoa(podIndex))
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return apierrors.IsNotFound(err)
+			}
+			return mdb.Status.ReplicationStatus[statefulset.PodName(mdb.ObjectMeta, podIndex)] == mariadbv1alpha1.ReplicationStateSlave
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		var endpoints corev1.Endpoints
+		By("Expecting Pod " + strconv.Itoa(podIndex) + " to present on the secondary endpoints")
+		Eventually(func() bool {
+			Expect(k8sClient.Get(testCtx, mdb.SecondaryServiceKey(), &endpoints)).To(Succeed())
+			Expect(endpoints.Subsets).To(HaveLen(1))
+
+			podKey := types.NamespacedName{
+				Name:      statefulset.PodName(mdb.ObjectMeta, podIndex),
+				Namespace: testNamespace,
+			}
+			var pod corev1.Pod
+			Expect(k8sClient.Get(testCtx, podKey, &pod)).To(Succeed())
+
+			for _, address := range endpoints.Subsets[0].Addresses {
+				if address.IP == pod.Status.PodIP {
+					return true
+				}
+			}
+			return false
+		}, testTimeout, testInterval).Should(BeTrue())
+
+	})
+
+	It("should reuse backup if backup still valid", func() {
+
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		// Get current backup age
+		By("Expecting to get current external MariadDB object")
+		refResolver := refresolver.New(k8sClient)
+		emdb, err := refResolver.ExternalMariaDB(testCtx, &mdb.Replication().ReplicaFromExternal.MariaDBRef, testNamespace)
+		Expect(err).To(Succeed())
+
+		key := types.NamespacedName{
+			Name:      emdb.Name,
+			Namespace: emdb.Namespace,
+		}
+		var existingBackup mariadbv1alpha1.Backup
+		By("Expecting to get backup object")
+		err = k8sClient.Get(testCtx, key, &existingBackup)
+		Expect(err).To(Succeed())
+		firstBackupCreationTimestamp := existingBackup.CreationTimestamp.Time
+
+		testDeletePod(mdb, 2, true)
+
+		// Get current backup age
+		By("Expecting to get backup object")
+		err = k8sClient.Get(testCtx, key, &existingBackup)
+		Expect(err).To(Succeed())
+		secondBackupCreationTimestamp := existingBackup.CreationTimestamp.Time
+
+		// Last age should be older than first
+		By("Expecting to have same CreationTimestamp on backup Object before and after the Pod recreation")
+		Expect(firstBackupCreationTimestamp).To(Equal(secondBackupCreationTimestamp))
+
+	})
+
+	It("should invalidate backup if older than the master binlog retention period", func() {
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		// Get current backup age
+		By("Expecting to get current external MariadDB object")
+		refResolver := refresolver.New(k8sClient)
+		emdb, err := refResolver.ExternalMariaDB(testCtx, &mdb.Replication().ReplicaFromExternal.MariaDBRef, testNamespace)
+		Expect(err).To(Succeed())
+
+		key := types.NamespacedName{
+			Name:      emdb.Name,
+			Namespace: emdb.Namespace,
+		}
+		var existingBackup mariadbv1alpha1.Backup
+		By("Expecting to get backup object")
+		err = k8sClient.Get(testCtx, key, &existingBackup)
+		Expect(err).To(Succeed())
+		firstBackupCreationTimestamp := existingBackup.CreationTimestamp.Time
+
+		podIndex := 2
+
+		// Change binlog_expire_logs_seconds to 10 on the master server
+		By("Expecting to get SqlClient from the external MariaDB")
+		client, err := sqlClient.NewClientWithMariaDB(testCtx, emdb, refResolver)
+		Expect(err).To(Succeed())
+		defer client.Close()
+
+		By("Expecting to set binlog_expire_logs_seconds to 10 on the master server")
+		Expect(client.SetSystemVariable(testCtx, "binlog_expire_logs_seconds", "60")).To(Succeed())
+
+		testDeletePod(mdb, podIndex, true)
+
+		// Get current backup age
+		By("Expecting to get backup object")
+		err = k8sClient.Get(testCtx, key, &existingBackup)
+		Expect(err).To(Succeed())
+		secondBackupCreationTimestamp := existingBackup.CreationTimestamp.Time
+
+		// Last age should be older than first
+		By("Expecting to have same CreationTimestamp on backup Object before and after the Pod recreation")
+		Expect(firstBackupCreationTimestamp).ShouldNot(Equal(secondBackupCreationTimestamp))
+
+		// Revert binlog_expire_logs_seconds to 30 days on the master server
+		By("Expecting to set expire_logs_days to 30 on the master server")
+		Expect(client.SetSystemVariable(testCtx, "expire_logs_days", "30")).To(Succeed())
+	})
+
+	It("scale up replicas", func() {
+
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		By("Increasing MariaDB replicas to 4")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			mdb.Spec.Replicas = 4
+
+			return k8sClient.Update(testCtx, mdb) == nil
+		}, testTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		var endpoints corev1.Endpoints
+		By("Expecting to create secondary Endpoints: 4")
+		Eventually(func() bool {
+			Expect(k8sClient.Get(testCtx, mdb.SecondaryServiceKey(), &endpoints)).To(Succeed())
+			Expect(endpoints.Subsets).To(HaveLen(1))
+			return len(endpoints.Subsets[0].Addresses) == 4
+		}, testTimeout, testInterval).Should(BeTrue())
+
+	})
+
+	It("scale down replicas", func() {
+
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		By("Decreasing MariaDB replicas to 3")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			mdb.Spec.Replicas = 3
+
+			return k8sClient.Update(testCtx, mdb) == nil
+		}, testTimeout, testInterval).Should(BeTrue())
+
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		var endpoints corev1.Endpoints
+		By("Expecting secondary Endpoints: 3")
+		Eventually(func() bool {
+			Expect(k8sClient.Get(testCtx, mdb.SecondaryServiceKey(), &endpoints)).To(Succeed())
+			Expect(endpoints.Subsets).To(HaveLen(1))
+			return len(endpoints.Subsets[0].Addresses) == 3
+		}, testTimeout, testInterval).Should(BeTrue())
+
+	})
+
+	It("should update", func() {
+		By("Updating MariaDB")
+		testMariadbUpdate(mdb)
+	})
+
+	It("should resize PVCs", func() {
+		By("Resizing MariaDB PVCs")
+		testMariadbVolumeResize(mdb, "400Mi")
+	})
+
 })
