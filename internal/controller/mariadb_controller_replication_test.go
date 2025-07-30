@@ -920,6 +920,37 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 
 	})
 
+	It("use the server_id offset", func() {
+
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
+		offset := mdb.Replication().ReplicaFromExternal.ServerIdOffset
+		replicas := int(mdb.Spec.Replicas)
+		refResolver := refresolver.New(k8sClient)
+		for i := 0; i < replicas; i++ {
+
+			client, err := sqlClient.NewInternalClientWithPodIndex(testCtx, mdb, refResolver, i)
+			By("Expecting to get SqlClient from Pod " + strconv.Itoa(i))
+			Expect(err).To(Succeed())
+
+			server_id, err := client.SystemVariable(testCtx, "server_id")
+			By("Expecting to get server_id from Pod " + strconv.Itoa(i))
+			Expect(err).To(Succeed())
+
+			server_id_int, _ := strconv.Atoi(server_id)
+
+			By("Expecting server_id to be equal to podIndex + ServerIdOffset on Pod " + strconv.Itoa(i))
+			Expect(server_id_int).To(Equal(i + *offset))
+
+		}
+	})
+
 	It("should update", func() {
 		By("Updating MariaDB")
 		testMariadbUpdate(mdb)
