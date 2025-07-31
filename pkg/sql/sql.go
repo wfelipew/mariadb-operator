@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -506,6 +507,45 @@ func (c *Client) UserExists(ctx context.Context, username, host string) (bool, e
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func (c *Client) GrantExists(ctx context.Context,
+	privileges []string,
+	database string,
+	table string,
+	accountName string,
+	opts ...GrantOption) (bool, error) {
+
+	var privilege string
+	var current_privileges []string
+	var rows *sql.Rows
+	var err error
+
+	if table != "*" && database != "*" {
+		rows, err = c.db.QueryContext(ctx, "SELECT PRIVILEGE_TYPE FROM information_schema.TABLE_PRIVILEGES where TABLE_NAME=? and TABLE_SCHEMA=? and GRANTEE=?", table, database, accountName)
+	} else if database != "*" {
+		rows, err = c.db.QueryContext(ctx, "SELECT PRIVILEGE_TYPE FROM information_schema.SCHEMA_PRIVILEGES where TABLE_SCHEMA=? and GRANTEE=?", database, accountName)
+	} else {
+		rows, err = c.db.QueryContext(ctx, "SELECT PRIVILEGE_TYPE FROM information_schema.USER_PRIVILEGES where GRANTEE=?", accountName)
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("failing getting privileges %v", err)
+	}
+
+	for rows.Next() {
+		rows.Scan(&privilege)
+		current_privileges = append(current_privileges, privilege)
+	}
+
+	for _, priv := range privileges {
+		if !slices.Contains(current_privileges, priv) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+
 }
 
 type grantOpts struct {
