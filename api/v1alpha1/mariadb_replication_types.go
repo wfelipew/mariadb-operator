@@ -157,10 +157,6 @@ type ReplicaFromExternal struct {
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:number"}
 	ConnectionRetries *int `json:"connectionRetries,omitempty"`
-	// // SyncTimeout defines the timeout for a replica to be synced with the primary when performing a primary switchover.
-	// // If the timeout is reached, the replica GTID will be reset and the switchover will continue.
-	// // +optional
-	// // +operator-sdk:csv:customresourcedefinitions:type=spe
 	// HealthCheckInterval to be used when the replica connects to the primary.
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:number"}

@@ -215,6 +215,20 @@ func (r *ReplicationReconciler) reconcileReplication(ctx context.Context, req *r
 		// Delete POD if it is a permanent issue
 		if state == mariadbv1alpha1.ReplicationStateSlavePermanentBroken && isExternalReplication {
 
+			// Only one pod should be rebuild at time to avoid complete disruption
+			// if all cluster nodes reach the ReplicationStateSlavePermanentBroken status
+			for pod, status := range req.mariadb.Status.ReplicationStatus {
+				if pod == fmt.Sprintf("%s-%d", req.mariadb.Name, i) {
+					continue
+				}
+				if status == mariadbv1alpha1.ReplicationStateNotConfigured {
+					return ctrl.Result{}, fmt.Errorf("error removing Pod '%s': another Pod is currently being configured, it should works on the next attempts", pod)
+				}
+			}
+			if len(req.mariadb.Status.ReplicationStatus) != int(req.mariadb.Spec.Replicas) {
+				return ctrl.Result{}, fmt.Errorf("error removing Pod '%s': another Pod is missing, it should works on the next attempts", pod)
+			}
+
 			// Delete PVC
 			key := types.NamespacedName{
 				Name:      fmt.Sprintf("storage-%s-%d", req.mariadb.Name, i),

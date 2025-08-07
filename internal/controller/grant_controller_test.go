@@ -498,7 +498,7 @@ var _ = Describe("Grant on a MariaDB replicating from external MariaDB", func() 
 
 		By("Creating a User")
 		userKey := types.NamespacedName{
-			Name:      "grant-user-all-test",
+			Name:      "grant-user-all-erep-test",
 			Namespace: testNamespace,
 		}
 		user := mariadbv1alpha1.User{
@@ -537,7 +537,7 @@ var _ = Describe("Grant on a MariaDB replicating from external MariaDB", func() 
 
 		By("Creating a Grant")
 		grantKey := types.NamespacedName{
-			Name:      "grant-select-insert-update-test",
+			Name:      "grant-select-insert-update-erep-test",
 			Namespace: testNamespace,
 		}
 		grant := mariadbv1alpha1.Grant{
@@ -605,10 +605,6 @@ var _ = Describe("Grant on a MariaDB replicating from external MariaDB", func() 
 
 			By("Expecting to GRANT exists on Pod" + strconv.Itoa(i) + " eventually")
 			Eventually(func() bool {
-				// fmt.Fprintf(GinkgoWriter, "Database:%v\n", grant.Spec.Database)
-				// fmt.Fprintf(GinkgoWriter, "Table:%v\n", grant.Spec.Table)
-				// fmt.Fprintf(GinkgoWriter, "Account:%v\n", grant.AccountName())
-
 				exists, err := client.GrantExists(testCtx, grant.Spec.Privileges, grant.Spec.Database, grant.Spec.Table, grant.AccountName())
 				if err != nil {
 					fmt.Fprintf(GinkgoWriter, "Error: %v\n", err)

@@ -727,7 +727,7 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 		Expect(client.SetSystemVariable(testCtx, "expire_logs_days", "30")).To(Succeed())
 	})
 
-	It("scale up replicas", func() {
+	It("scale out replicas", func() {
 
 		By("Expecting MariaDB to be ready eventually")
 		Eventually(func() bool {
@@ -765,7 +765,7 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 
 	})
 
-	It("scale down replicas", func() {
+	It("scale in replicas", func() {
 
 		By("Expecting MariaDB to be ready eventually")
 		Eventually(func() bool {

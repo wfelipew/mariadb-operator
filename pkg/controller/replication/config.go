@@ -128,12 +128,6 @@ func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *maria
 			return nil
 		}
 
-		// Check if a restore is running
-
-		// if !mariadb.HasRestoredBackup() {
-		// 	return nil
-		// }s
-
 		var existingRestore mariadbv1alpha1.Restore
 		err = r.Get(ctx, mariadb.RestoreKeyInPod(replicaPodIndex), &existingRestore)
 
@@ -144,14 +138,6 @@ func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *maria
 		if !existingRestore.IsComplete() {
 			// Restore/Bootstrap node from backup
 			return newRestore(mariadb, *r, ctx, replicaPodIndex)
-			// restore, err := r.builder.BuildRestore(mariadb, mariadb.RestoreKey())
-			// if err != nil {
-			// 	return fmt.Errorf("error building Restore object: %v", err)
-			// }
-			// if err := r.Create(ctx, restore); err != nil {
-			// 	return fmt.Errorf("error creating Restore object: %v", err)
-			// }
-			// return nil
 		}
 
 		if err := r.Delete(ctx, &existingRestore); err != nil {
