@@ -222,7 +222,8 @@ func (r *ReplicationReconciler) reconcileReplication(ctx context.Context, req *r
 					continue
 				}
 				if status == mariadbv1alpha1.ReplicationStateNotConfigured {
-					return ctrl.Result{}, fmt.Errorf("error removing Pod '%s': another Pod is currently being configured, it should works on the next attempts", pod)
+					return ctrl.Result{},
+						fmt.Errorf("error removing Pod '%s': another Pod is currently being configured, it should works on the next attempts", pod)
 				}
 			}
 			if len(req.mariadb.Status.ReplicationStatus) != int(req.mariadb.Spec.Replicas) {

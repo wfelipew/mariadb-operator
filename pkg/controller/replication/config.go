@@ -121,7 +121,7 @@ func (r *ReplicationConfig) ConfigureReplica(ctx context.Context, mariadb *maria
 		}
 		// Create a new backup if required
 		if err != nil || isBackupInvalid {
-			return newBackup(emdb, *r, ctx, binlogExpireLogsDuration)
+			return newBackup(emdb, *r, ctx, binlogExpireLogsDuration, mariadb.GetImagePullSecrets())
 		}
 
 		if !existingBackup.IsComplete() {
@@ -413,7 +413,7 @@ func newRestore(mariadb *mariadbv1alpha1.MariaDB, r ReplicationConfig, ctx conte
 }
 
 func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r ReplicationConfig, ctx context.Context,
-	binlogExpireLogsDuration time.Duration) error {
+	binlogExpireLogsDuration time.Duration, imagePullSecrets []mariadbv1alpha1.LocalObjectReference) error {
 
 	key := types.NamespacedName{
 		Name:      emdb.Name,
@@ -449,7 +449,8 @@ func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r ReplicationConfig, ctx c
 				},
 			},
 		},
-		MaxRetention: binlogExpireLogsDuration,
+		MaxRetention:     binlogExpireLogsDuration,
+		ImagePullSecrets: imagePullSecrets,
 	}
 
 	backup, err := r.builder.BuildBackup(backupOps, emdb)

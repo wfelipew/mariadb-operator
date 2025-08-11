@@ -522,9 +522,14 @@ func (c *Client) GrantExists(ctx context.Context,
 	var err error
 
 	if table != "*" && database != "*" {
-		rows, err = c.db.QueryContext(ctx, "SELECT PRIVILEGE_TYPE FROM information_schema.TABLE_PRIVILEGES where TABLE_NAME=? and TABLE_SCHEMA=? and GRANTEE=?", table, database, accountName)
+		rows, err = c.db.QueryContext(ctx,
+			"SELECT PRIVILEGE_TYPE FROM information_schema.TABLE_PRIVILEGES where TABLE_NAME=? and TABLE_SCHEMA=? and GRANTEE=?",
+			table, database, accountName)
 	} else if database != "*" {
-		rows, err = c.db.QueryContext(ctx, "SELECT PRIVILEGE_TYPE FROM information_schema.SCHEMA_PRIVILEGES where TABLE_SCHEMA=? and GRANTEE=?", database, accountName)
+		rows, err = c.db.QueryContext(ctx,
+			"SELECT PRIVILEGE_TYPE FROM information_schema.SCHEMA_PRIVILEGES where TABLE_SCHEMA=? and GRANTEE=?",
+			database,
+			accountName)
 	} else {
 		rows, err = c.db.QueryContext(ctx, "SELECT PRIVILEGE_TYPE FROM information_schema.USER_PRIVILEGES where GRANTEE=?", accountName)
 	}
@@ -534,7 +539,10 @@ func (c *Client) GrantExists(ctx context.Context,
 	}
 
 	for rows.Next() {
-		rows.Scan(&privilege)
+		err := rows.Scan(&privilege)
+		if err != nil {
+			return false, fmt.Errorf("failing getting privileges %v", err)
+		}
 		current_privileges = append(current_privileges, privilege)
 	}
 

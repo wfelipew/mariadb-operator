@@ -21,7 +21,8 @@ type BackupOpts struct {
 	Resources   mariadbv1alpha1.ResourceRequirements
 	Affinity    mariadbv1alpha1.AffinityConfig
 	// MaxRetention metav1.Duration
-	MaxRetention time.Duration
+	MaxRetention     time.Duration
+	ImagePullSecrets []mariadbv1alpha1.LocalObjectReference
 }
 
 func (b *Builder) BuildBackup(opts BackupOpts, owner metav1.Object) (*mariadbv1alpha1.Backup, error) {
@@ -38,6 +39,7 @@ func (b *Builder) BuildBackup(opts BackupOpts, owner metav1.Object) (*mariadbv1a
 			Storage:     opts.Storage,
 			MariaDBRef:  opts.MariaDBRef,
 			Compression: opts.Compression,
+
 			MaxRetention: metav1.Duration{
 				Duration: opts.MaxRetention,
 			},
@@ -49,6 +51,10 @@ func (b *Builder) BuildBackup(opts BackupOpts, owner metav1.Object) (*mariadbv1a
 				Affinity: &opts.Affinity,
 			},
 		},
+	}
+
+	if len(opts.ImagePullSecrets) > 0 {
+		backup.Spec.JobPodTemplate.ImagePullSecrets = opts.ImagePullSecrets
 	}
 
 	if owner != nil {
