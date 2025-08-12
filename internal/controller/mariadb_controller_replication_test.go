@@ -566,10 +566,10 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 		Expect(client.Exec(testCtx, "STOP SLAVE")).To(Succeed(), client.Exec(testCtx, "SET GLOBAL gtid_slave_pos = '0-9999-9999'"))
 
 		By("Expecting to set Invalid GTID position on Pod 2")
-		Expect(client.Exec(testCtx, "SET GLOBAL gtid_slave_pos = '0-9999-9999'"))
+		Expect(client.Exec(testCtx, "SET GLOBAL gtid_slave_pos = '0-9999-9999'")).To(Succeed())
 
 		By("Expecting to start replication on Pod 2")
-		Expect(client.Exec(testCtx, "START SLAVE"))
+		Expect(client.Exec(testCtx, "START SLAVE")).To(Succeed())
 
 		By("Expecting replication error 1236 on Pod " + strconv.Itoa(podIndex))
 		Eventually(func() bool {
