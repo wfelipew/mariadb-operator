@@ -11,6 +11,7 @@ import (
 	condition "github.com/mariadb-operator/mariadb-operator/v25/pkg/condition"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/controller/replication"
 	mdbpod "github.com/mariadb-operator/mariadb-operator/v25/pkg/pod"
+	"github.com/mariadb-operator/mariadb-operator/v25/pkg/sql"
 	stspkg "github.com/mariadb-operator/mariadb-operator/v25/pkg/statefulset"
 	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -54,6 +55,11 @@ func (r *MariaDBReconciler) reconcileStatus(ctx context.Context, mdb *mariadbv1a
 		logger.Info("error getting TLS status", "err", err)
 	}
 
+	// var result ctrl.Result
+	// if mdb.Replication().ReplicaFromExternal != nil {
+	// 	result = ctrl.Result{RequeueAfter: mdb.Replication().ReplicaFromExternal.HealthCheckInterval.Duration}
+	// }
+
 	return ctrl.Result{}, r.patchStatus(ctx, mdb, func(status *mariadbv1alpha1.MariaDBStatus) error {
 		status.DefaultVersion = r.Environment.MariadbDefaultVersion
 		status.Replicas = sts.Status.ReadyReplicas
@@ -95,6 +101,8 @@ func (r *MariaDBReconciler) reconcileStatus(ctx context.Context, mdb *mariadbv1a
 
 func (r *MariaDBReconciler) getReplicationRoles(ctx context.Context,
 	mdb *mariadbv1alpha1.MariaDB) (map[string]mariadbv1alpha1.ReplicationRole, error) {
+	logger := log.FromContext(ctx)
+	logger.V(1).Info("####### getReplicationStatus #########")
 	if !mdb.IsReplicationEnabled() {
 		return nil, nil
 	}
@@ -106,7 +114,7 @@ func (r *MariaDBReconciler) getReplicationRoles(ctx context.Context,
 	defer clientSet.Close()
 
 	var replState map[string]mariadbv1alpha1.ReplicationRole
-	logger := log.FromContext(ctx)
+
 	for i := 0; i < int(mdb.Spec.Replicas); i++ {
 		pod := stspkg.PodName(mdb.ObjectMeta, i)
 
@@ -130,7 +138,20 @@ func (r *MariaDBReconciler) getReplicationRoles(ctx context.Context,
 
 		role := mariadbv1alpha1.ReplicationRoleUnknown
 		if isReplica {
-			role = mariadbv1alpha1.ReplicationRoleReplica
+			// role = mariadbv1alpha1.ReplicationRoleReplica
+			replicationHealthy, _ := client.IsReplicationHealthy(ctx)
+			replicationStatus, _ := client.GetReplicationStatus(ctx)
+
+			if replicationHealthy {
+				role = mariadbv1alpha1.ReplicationRoleReplica
+			} else {
+
+				if IsReplicationPermanentBroken(replicationStatus) {
+					role = mariadbv1alpha1.ReplicationRoleReplicaPermanentBroken
+				} else {
+					role = mariadbv1alpha1.ReplicationRoleReplicaBroken
+				}
+			}
 		} else if hasConnectedReplicas {
 			role = mariadbv1alpha1.ReplicationRolePrimary
 		}
@@ -331,4 +352,23 @@ func setMaxScalePrimary(mdb *mariadbv1alpha1.MariaDB, podIndex *int) {
 	}
 	mdb.Status.CurrentPrimaryPodIndex = podIndex
 	mdb.Status.CurrentPrimary = ptr.To(stspkg.PodName(mdb.ObjectMeta, *podIndex))
+}
+
+func IsReplicationPermanentBroken(status sql.ReplicaStatus) bool {
+
+	// Requested GTID is not present on the Master binlog
+	if status.SlaveIORunning == "No" && status.LastIOErrno.Int32 == 1236 {
+		return true
+	}
+
+	// SlaveSQLRunning="No" with SlaveIORunning="Yes" usually means
+	// issues with data consistency.
+	if status.SlaveSQLRunning == "No" &&
+		status.SlaveIORunning == "Yes" &&
+		status.LastSQLError.String != "" {
+		return true
+	}
+
+	return false
+
 }

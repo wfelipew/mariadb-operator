@@ -69,6 +69,8 @@ type PodEnvironment struct {
 	MariadbPort         string `env:"MYSQL_TCP_PORT,required"`
 
 	MariaDBReplEnabled                 string `env:"MARIADB_REPL_ENABLED"`
+	MariaDBExternalReplEnabled         string `env:"MARIADB_EXTERNAL_REPL_ENABLED"`
+	MariaDBExternalReplServerIdOffset  string `env:"MARIADB_EXTERNAL_REPL_SERVER_ID_OFFSET"`
 	MariaDBReplGtidStrictMode          string `env:"MARIADB_REPL_GTID_STRICT_MODE"`
 	MariaDBReplSemiSyncEnabled         string `env:"MARIADB_REPL_SEMI_SYNC_ENABLED"`
 	MariaDBReplSemiSyncMasterTimeout   string `env:"MARIADB_REPL_SEMI_SYNC_MASTER_TIMEOUT"`
@@ -155,6 +157,33 @@ func (e *PodEnvironment) ReplSyncBinlog() (*int, error) {
 		return nil, fmt.Errorf("invalid replication master sync binlog: %w", err)
 	}
 	return &timeout, nil
+}
+
+func (e *PodEnvironment) IsExternalReplEnabled() (bool, error) {
+	replEnabled, err := e.IsReplEnabled()
+	if err != nil {
+		return false, err
+	}
+	if !replEnabled {
+		return false, errors.New("replication must be enabled")
+	}
+	if e.MariaDBExternalReplEnabled == "" {
+		return false, nil
+	}
+	return strconv.ParseBool(e.MariaDBExternalReplEnabled)
+}
+
+func (e *PodEnvironment) ExternalReplServerIdOffset() (*int, error) {
+	extReplEnabled, err := e.IsExternalReplEnabled()
+	if err != nil {
+		return nil, err
+	}
+	if !extReplEnabled {
+		return nil, errors.New("external replication must be enabled")
+	}
+	offset, err := strconv.Atoi(e.MariaDBExternalReplServerIdOffset)
+	return &offset, err
+
 }
 
 func GetPodEnv(ctx context.Context) (*PodEnvironment, error) {

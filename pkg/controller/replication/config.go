@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"strconv"
+	"time"
 
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/v25/api/v1alpha1"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/builder"
@@ -15,6 +17,10 @@ import (
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/refresolver"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/sql"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/statefulset"
+	"golang.org/x/mod/semver"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -93,11 +99,15 @@ func WithChangeMasterOpts(opts ...sql.ChangeMasterOpt) ConfigureReplicaOpt {
 }
 
 func (r *ReplicationConfigClient) ConfigureReplica(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB, client *sql.Client,
-	primaryPodIndex int, replicaOpts ...ConfigureReplicaOpt) error {
+	primaryPodIndex int, replicaPodIndex int, replicaOpts ...ConfigureReplicaOpt) error {
+
 	opts := ConfigureReplicaOpts{}
 	for _, setOpt := range replicaOpts {
 		setOpt(&opts)
 	}
+
+	replication := mariadb.Replication()
+	isExternalReplication := replication.IsExternalReplication()
 
 	if err := client.ResetMaster(ctx); err != nil {
 		return fmt.Errorf("error resetting master: %v", err)
@@ -117,6 +127,18 @@ func (r *ReplicationConfigClient) ConfigureReplica(ctx context.Context, mariadb 
 	if err := client.EnableReadOnly(ctx); err != nil {
 		return fmt.Errorf("error enabling read_only: %v", err)
 	}
+
+	isReplicationConfigured, _ := client.IsReplicationConfigured(ctx)
+
+	// return fmt.Errorf("REPLICATION ALREADY configured :%v ", val)
+
+	if isExternalReplication && !isReplicationConfigured {
+
+		if ready, err := r.configureExternalReplica(ctx, mariadb, replicaPodIndex); !ready || err != nil {
+			return err
+		}
+	}
+
 	if err := r.changeMaster(ctx, mariadb, client, primaryPodIndex, opts.ChangeMasterOpts...); err != nil {
 		return fmt.Errorf("error changing master: %v", err)
 	}
@@ -126,9 +148,62 @@ func (r *ReplicationConfigClient) ConfigureReplica(ctx context.Context, mariadb 
 	return nil
 }
 
+func (r *ReplicationConfigClient) configureExternalReplica(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
+	replicaPodIndex int) (bool, error) {
+
+	replication := mariadb.Replication()
+	emdb, err := r.refResolver.ExternalMariaDB(ctx, &replication.ReplicaFromExternal.MariaDBRef, mariadb.Namespace)
+	if err != nil {
+		return false, fmt.Errorf("error getting external MariaDB object: %v", err)
+	}
+	key := types.NamespacedName{
+		Name:      emdb.Name,
+		Namespace: emdb.Namespace,
+	}
+	// Check if a viable backup already exists
+	var isBackupInvalid = false
+	var binlogExpireLogsDuration time.Duration
+	var existingBackup mariadbv1alpha1.Backup
+
+	if binlogExpireLogsDuration, err = getBinlogExpireLogsDuration(emdb, ctx, r.refResolver); err != nil {
+		return false, fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+	}
+	err = r.Get(ctx, key, &existingBackup)
+	if err == nil {
+		isBackupInvalid = invalidateBackup(existingBackup, ctx, binlogExpireLogsDuration, *r)
+	}
+	// Create a new backup if required
+	if err != nil || isBackupInvalid {
+		return false, newBackup(emdb, *r, ctx, binlogExpireLogsDuration, mariadb.GetImagePullSecrets(), mariadb.Spec.Storage.Size)
+	}
+
+	if !existingBackup.IsComplete() {
+		return false, nil
+	}
+
+	var existingRestore mariadbv1alpha1.Restore
+	err = r.Get(ctx, mariadb.RestoreKeyInPod(replicaPodIndex), &existingRestore)
+
+	if err == nil && !existingRestore.IsComplete() {
+		return false, nil
+	}
+
+	if !existingRestore.IsComplete() {
+		// Restore/Bootstrap node from backup
+		return false, newRestore(mariadb, *r, ctx, replicaPodIndex)
+	}
+
+	if err := r.Delete(ctx, &existingRestore); err != nil {
+		return false, fmt.Errorf("error deleting Restore: %v", err)
+	}
+
+	return true, nil
+}
+
 func (r *ReplicationConfigClient) changeMaster(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB, client *sql.Client,
 	primaryPodIndex int, opts ...sql.ChangeMasterOpt) error {
 	replication := ptr.Deref(mariadb.Spec.Replication, mariadbv1alpha1.Replication{})
+	// replication := mariadb.Replication()
 	if replication.Replica.ReplPasswordSecretKeyRef == nil {
 		return errors.New("'spec.replication.replica.replPasswordSecretKeyRef` must not be nil'")
 	}
@@ -144,31 +219,57 @@ func (r *ReplicationConfigClient) changeMaster(ctx context.Context, mariadb *mar
 		return fmt.Errorf("error getting change master GTID: %v", err)
 	}
 
-	changeMasterOpts := []sql.ChangeMasterOpt{
-		sql.WithChangeMasterHost(
-			statefulset.PodFQDNWithService(
-				mariadb.ObjectMeta,
-				primaryPodIndex,
-				mariadb.InternalServiceKey().Name,
+	var changeMasterOpts []sql.ChangeMasterOpt
+
+	if !replication.IsExternalReplication() {
+		changeMasterOpts = []sql.ChangeMasterOpt{
+			sql.WithChangeMasterHost(
+				statefulset.PodFQDNWithService(
+					mariadb.ObjectMeta,
+					primaryPodIndex,
+					mariadb.InternalServiceKey().Name,
+				),
 			),
-		),
-		sql.WithChangeMasterPort(mariadb.Spec.Port),
-		sql.WithChangeMasterCredentials(replUser, password),
-		sql.WithChangeMasterGtid(gtidString),
-	}
-	if mariadb.IsTLSEnabled() {
-		changeMasterOpts = append(changeMasterOpts, sql.WithChangeMasterSSL(
-			builderpki.ClientCertPath,
-			builderpki.ClientKeyPath,
-			builderpki.CACertPath,
-		))
-	}
+			sql.WithChangeMasterPort(mariadb.Spec.Port),
+			sql.WithChangeMasterCredentials(replUser, password),
+			sql.WithChangeMasterGtid(gtidString),
+		}
+		if mariadb.IsTLSEnabled() {
+			changeMasterOpts = append(changeMasterOpts, sql.WithChangeMasterSSL(
+				builderpki.ClientCertPath,
+				builderpki.ClientKeyPath,
+				builderpki.CACertPath,
+			))
+		}
 
-	if retries := ptr.Deref(replication.Replica.ConnectionRetrySeconds, -1); retries != -1 {
-		changeMasterOpts = append(changeMasterOpts, sql.WithChangeMasterRetries(*replication.Replica.ConnectionRetrySeconds))
-	}
+		if retries := ptr.Deref(replication.Replica.ConnectionRetrySeconds, -1); retries != -1 {
+			changeMasterOpts = append(changeMasterOpts, sql.WithChangeMasterRetries(*replication.Replica.ConnectionRetrySeconds))
+		}
 
-	changeMasterOpts = append(changeMasterOpts, opts...)
+		changeMasterOpts = append(changeMasterOpts, opts...)
+	} else {
+		var emdb *mariadbv1alpha1.ExternalMariaDB
+		replPasswordRef, err := externalReplPasswordRef(mariadb, r.refResolver, ctx)
+		if err != nil {
+			return fmt.Errorf("error getting ExternalMariaDB password Ref: %v", err)
+		}
+		password, err := r.refResolver.SecretKeyRef(ctx, replPasswordRef, mariadb.Namespace)
+		if err != nil {
+			return fmt.Errorf("error getting ExternalMariaDB password replication secret: %v", err)
+		}
+		emdbRef := replication.GetExternalReplicationRef()
+		emdb, err = r.refResolver.ExternalMariaDB(ctx, &emdbRef, mariadb.Namespace)
+		if err != nil {
+			return fmt.Errorf("error getting ExternalMariaDB: %v", err)
+		}
+		changeMasterOpts = []sql.ChangeMasterOpt{
+			sql.WithChangeMasterHost(
+				emdb.GetHost(),
+			),
+			sql.WithChangeMasterPort(emdb.GetPort()),
+			sql.WithChangeMasterCredentials(emdb.GetSUName(), password),
+		}
+	}
 
 	if err := client.ChangeMaster(ctx, changeMasterOpts...); err != nil {
 		return fmt.Errorf("error changing master: %v", err)
@@ -233,6 +334,8 @@ func (r *ReplicationConfigClient) reconcileUserSql(ctx context.Context, mariadb 
 }
 
 func NewReplicationConfig(env *env.PodEnvironment) ([]byte, error) {
+	var sId int
+
 	replEnabled, err := env.IsReplEnabled()
 	if err != nil {
 		return nil, fmt.Errorf("error checking if replication is enabled: %v", err)
@@ -252,10 +355,28 @@ func NewReplicationConfig(env *env.PodEnvironment) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error getting semi-sync master timeout: %v", err)
 	}
-	serverId, err := serverId(env.PodName)
+	externalReplEnabled, err := env.IsExternalReplEnabled()
 	if err != nil {
-		return nil, fmt.Errorf("error getting server ID: %v", err)
+		return nil, fmt.Errorf("error checking if external replication is enabled: %v", err)
 	}
+
+	externalReplServerIdOffset, err := env.ExternalReplServerIdOffset()
+	if err != nil {
+		return nil, fmt.Errorf("error get serverId offset for external replication: %v", err)
+	}
+
+	if externalReplEnabled && *externalReplServerIdOffset != 0 {
+		sId, err = offsetServerId(env.PodName, *externalReplServerIdOffset)
+		if err != nil {
+			return nil, fmt.Errorf("error getting server_id with offset server ID: %v", err)
+		}
+	} else {
+		sId, err = serverId(env.PodName)
+		if err != nil {
+			return nil, fmt.Errorf("error getting server ID: %v", err)
+		}
+	}
+
 	syncBinlog, err := env.ReplSyncBinlog()
 	if err != nil {
 		return nil, fmt.Errorf("error getting master sync binlog: %v", err)
@@ -299,7 +420,7 @@ sync_binlog={{ . }}
 		SemiSyncEnabled:         semiSyncEnabled,
 		SemiSyncMasterTimeout:   semiSyncMasterTimeout,
 		SemiSyncMasterWaitPoint: env.MariaDBReplSemiSyncMasterWaitPoint,
-		ServerId:                serverId,
+		ServerId:                sId,
 		SyncBinlog:              syncBinlog,
 	})
 	if err != nil {
@@ -316,6 +437,39 @@ func serverId(podName string) (int, error) {
 	return 10 + *podIndex, nil
 }
 
+func externalReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB, r *refresolver.RefResolver,
+	ctx context.Context) (mariadbv1alpha1.SecretKeySelector, error) {
+	replication := mariadb.Replication()
+	if mariadb.Replication().Enabled && mariadb.Replication().Replica.ReplPasswordSecretKeyRef != nil {
+		return mariadb.Replication().Replica.ReplPasswordSecretKeyRef.SecretKeySelector, nil
+	}
+	if replication.IsExternalReplication() {
+		emdbRef := replication.GetExternalReplicationRef()
+		emdb, err := r.ExternalMariaDB(ctx, &emdbRef, mariadb.Namespace)
+		if err == nil {
+			return *emdb.GetSUCredential(), nil
+		}
+	}
+	return mariadbv1alpha1.SecretKeySelector{
+		LocalObjectReference: mariadbv1alpha1.LocalObjectReference{
+			Name: "",
+		},
+		Key: "",
+	}, fmt.Errorf("not able to get PasswordRef for external replication")
+}
+
+// func serverId(index int) string {
+// 	return fmt.Sprint(10 + index)
+// }
+
+func offsetServerId(podName string, offset int) (int, error) {
+	podIndex, err := statefulset.PodIndex(podName)
+	if err != nil {
+		return 0, fmt.Errorf("error getting Pod index: %v", err)
+	}
+	return *podIndex + offset, nil
+}
+
 func formatAccountName(username, host string) string {
 	return fmt.Sprintf("'%s'@'%s'", username, host)
 }
@@ -323,3 +477,126 @@ func formatAccountName(username, host string) string {
 func createTpl(name, t string) *template.Template {
 	return template.Must(template.New(name).Parse(t))
 }
+
+func newRestore(mariadb *mariadbv1alpha1.MariaDB, r ReplicationConfigClient, ctx context.Context, replicaPodIndex int) error {
+	restoreOpts := builder.RestoreOpts{
+		PodIndex: &replicaPodIndex,
+	}
+	restore, err := r.builder.BuildRestore(mariadb, mariadb.RestoreKeyInPod(replicaPodIndex), restoreOpts)
+	if err != nil {
+		return fmt.Errorf("error building Restore object: %v", err)
+	}
+	if err := r.Create(ctx, restore); err != nil {
+		return fmt.Errorf("error creating Restore object: %v", err)
+	}
+	// return fmt.Errorf("CREATING Restore object: %v", restore.Name)
+	return nil
+}
+
+func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r ReplicationConfigClient, ctx context.Context,
+	binlogExpireLogsDuration time.Duration, imagePullSecrets []mariadbv1alpha1.LocalObjectReference,
+	size *resource.Quantity) error {
+
+	key := types.NamespacedName{
+		Name:      emdb.Name,
+		Namespace: emdb.Namespace,
+	}
+	backupOps := builder.BackupOpts{
+		Metadata: []*mariadbv1alpha1.Metadata{emdb.Spec.InheritMetadata},
+		Key:      key,
+		MariaDBRef: mariadbv1alpha1.MariaDBRef{
+			ObjectReference: mariadbv1alpha1.ObjectReference{
+				Name: emdb.Name,
+			},
+			Kind: mariadbv1alpha1.ExternalMariaDBKind,
+		},
+		Args: []string{
+			"--master-data=1",
+			"--gtid",
+			"--verbose",
+			"--all-databases",
+			"--single-transaction",
+			"--ignore-table=mysql.global_priv",
+		},
+		Compression: mariadbv1alpha1.CompressGzip,
+		Storage: mariadbv1alpha1.BackupStorage{
+			PersistentVolumeClaim: &mariadbv1alpha1.PersistentVolumeClaimSpec{
+				AccessModes: []v1.PersistentVolumeAccessMode{
+					v1.ReadWriteOnce,
+				},
+				Resources: v1.VolumeResourceRequirements{
+					Requests: v1.ResourceList{
+						"storage": *size,
+					},
+				},
+			},
+		},
+		MaxRetention:     binlogExpireLogsDuration,
+		ImagePullSecrets: imagePullSecrets,
+	}
+
+	backup, err := r.builder.BuildBackup(backupOps, emdb)
+	if err != nil {
+		return fmt.Errorf("error building Backup object: %v", err)
+	}
+	if err := r.Create(ctx, backup); err != nil {
+		return fmt.Errorf("error creating base Backup: %v", err)
+	}
+	return nil
+}
+
+func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx context.Context,
+	refResolver *refresolver.RefResolver) (time.Duration, error) {
+	var external_client *sql.Client
+	var err error
+	if external_client, err = sql.NewClientWithMariaDB(ctx, emdb, refResolver); err != nil {
+		return time.Duration(0), fmt.Errorf("error getting external MariaDB client: %v", err)
+	}
+	defer external_client.Close()
+
+	var binlogExpireLogsSecondsStr string
+	var binlogExpireLogsSeconds int
+
+	if semver.Compare(emdb.Status.Version, "10.6.1") >= 0 {
+		binlogExpireLogsSecondsStr, err = external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
+		if err != nil {
+			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+		}
+		binlogExpireLogsSeconds, _ = strconv.Atoi(binlogExpireLogsSecondsStr)
+	} else {
+		binlogExpireLogsDaysStr, err := external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
+		if err != nil {
+			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+		}
+		binlogExpireLogsDays, _ := strconv.Atoi(binlogExpireLogsDaysStr)
+		binlogExpireLogsSeconds = binlogExpireLogsDays * 86400
+	}
+
+	return time.Duration(binlogExpireLogsSeconds) * time.Second, nil
+}
+
+func invalidateBackup(existingBackup mariadbv1alpha1.Backup, ctx context.Context,
+	binlogExpireLogsDuration time.Duration, r ReplicationConfigClient) bool {
+	if time.Since(existingBackup.CreationTimestamp.Time) > binlogExpireLogsDuration {
+		if err := r.Delete(ctx, &existingBackup); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// func newReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB) mariadbv1alpha1.GeneratedSecretKeyRef {
+// 	if mariadb.Replication().Enabled && mariadb.Replication().Replica.ReplPasswordSecretKeyRef != nil {
+// 		return *mariadb.Replication().Replica.ReplPasswordSecretKeyRef
+// 	}
+
+// 	return mariadbv1alpha1.GeneratedSecretKeyRef{
+// 		SecretKeySelector: mariadbv1alpha1.SecretKeySelector{
+// 			LocalObjectReference: mariadbv1alpha1.LocalObjectReference{
+// 				Name: fmt.Sprintf("repl-password-%s", mariadb.Name),
+// 			},
+// 			Key: "password",
+// 		},
+// 		Generate: true,
+// 	}
+// }

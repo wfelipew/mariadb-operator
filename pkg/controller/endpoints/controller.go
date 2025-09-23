@@ -97,7 +97,14 @@ func (r *EndpointsReconciler) endpointSlice(ctx context.Context, key types.Names
 			logger.Info("error building Endpoint", "err", err)
 			continue
 		}
-		endpoints = append(endpoints, *endpoint)
+		//@TODO Revisit it
+		if mdbpod.PodReady(&pod) && (mariadb.Status.Replication.Roles[pod.Name] == mariadbv1alpha1.ReplicationRoleReplica ||
+			mariadb.Status.Replication.Roles[pod.Name] == mariadbv1alpha1.ReplicationRoleReplicaBroken) {
+			endpoints = append(endpoints, *endpoint)
+		} else {
+			endpoint.Conditions.Ready = ptr.To(false)
+			endpoints = append(endpoints, *endpoint)
+		}
 	}
 	if len(endpoints) == 0 {
 		return nil, errNoEndpointsAvailable

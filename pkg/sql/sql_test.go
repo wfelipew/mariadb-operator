@@ -46,7 +46,13 @@ MASTER_HOST='127.0.0.1',
 MASTER_PORT=3306,
 MASTER_USER='repl',
 MASTER_PASSWORD='password',
+<<<<<<< HEAD
 MASTER_USE_GTID=CurrentPos;
+=======
+MASTER_USE_GTID=CurrentPos,
+MASTER_CONNECT_RETRY=10,
+MASTER_SSL_VERIFY_SERVER_CERT=0;
+>>>>>>> 7cbe532f (Adding support to external replication)
 `,
 			wantErr: false,
 		},

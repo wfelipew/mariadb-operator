@@ -488,6 +488,19 @@ func mariadbEnv(mariadb *mariadbv1alpha1.MariaDB) ([]corev1.EnvVar, error) {
 	}
 
 	if mariadb.IsReplicationEnabled() {
+
+		if mariadb.Replication().ReplicaFromExternal != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "MARIADB_EXTERNAL_REPL_ENABLED",
+				Value: fmt.Sprint(true),
+			})
+
+			env = append(env, corev1.EnvVar{
+				Name:  "MARIADB_EXTERNAL_REPL_SERVER_ID_OFFSET",
+				Value: fmt.Sprint(*mariadb.Replication().ReplicaFromExternal.ServerIdOffset),
+			})
+		}
+
 		env = append(env, corev1.EnvVar{
 			Name:  "MARIADB_REPL_ENABLED",
 			Value: fmt.Sprint(true),

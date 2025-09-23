@@ -258,6 +258,11 @@ func shouldSkipPhase(err error) bool {
 }
 
 func requeueResult(ctx context.Context, mdb *mariadbv1alpha1.MariaDB) (ctrl.Result, error) {
+	if mdb.Replication().ReplicaFromExternal != nil {
+		log.FromContext(ctx).V(1).Info("Requeuing MariaDB")
+		return ctrl.Result{RequeueAfter: mdb.Replication().ReplicaFromExternal.HealthCheckInterval.Duration}, nil // ensure replicas status are updated
+	}
+
 	if mdb.IsTLSEnabled() {
 		log.FromContext(ctx).V(1).Info("Requeuing MariaDB")
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil // ensure certificates get renewed
@@ -511,8 +516,8 @@ func (r *MariaDBReconciler) reconcileRestore(ctx context.Context, mdb *mariadbv1
 	}); err != nil {
 		return ctrl.Result{}, fmt.Errorf("error patching status: %v", err)
 	}
-
-	restore, err := r.Builder.BuildRestore(mdb, mdb.RestoreKey())
+	restoreOpts := builder.RestoreOpts{}
+	restore, err := r.Builder.BuildRestore(mdb, mdb.RestoreKey(), restoreOpts)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("error building restore: %v", err)
 	}

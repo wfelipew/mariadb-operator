@@ -4774,6 +4774,52 @@ spec:
                           See: https://mariadb.com/docs/server/reference/sql-functions/secondary-functions/miscellaneous-functions/master_gtid_wait
                         type: string
                     type: object
+                  replicaFromExternal:
+                    description: ReplicaFromExternal specifies whether the replica
+                      should be created from an external MariaDB instance.
+                    properties:
+                      connectionRetries:
+                        description: ConnectionRetries to be used when the replica
+                          connects to the primary.
+                        type: integer
+                      connectionTimeout:
+                        description: ConnectionTimeout to be used when the replica
+                          connects to the primary.
+                        type: string
+                      gtid:
+                        description: |-
+                          Gtid indicates which Global Transaction ID should be used when connecting a replica to the master.
+                          See: https://mariadb.com/kb/en/gtid/#using-current_pos-vs-slave_pos.
+                        enum:
+                        - CurrentPos
+                        - SlavePos
+                        type: string
+                      healthCheckInterval:
+                        description: HealthCheckInterval to be used when the replica
+                          connects to the primary.
+                        type: string
+                      mariaDbRef:
+                        description: MariaDBRef is a reference to a MariaDB object.
+                        properties:
+                          kind:
+                            description: Kind of the referent.
+                            type: string
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                          waitForIt:
+                            default: true
+                            description: WaitForIt indicates whether the controller
+                              using this reference should wait for MariaDB to be ready.
+                            type: boolean
+                        type: object
+                      serverIdOffset:
+                        description: ServerIdOffset to be used on the replicas.
+                        type: integer
+                    required:
+                    - mariaDbRef
+                    type: object
                   semiSyncAckTimeout:
                     description: |-
                       SemiSyncAckTimeout for the replica to acknowledge transactions to the primary.
@@ -5839,7 +5885,7 @@ spec:
                 is required to avoid split brain situations for Galera. Use ''mariadb.spec.replicasAllowEvenNumber:
                 true'' to disable this validation.'
               rule: '!has(self.galera) || !self.galera.enabled || (self.replicas %
-                2 == 1 || self.replicasAllowEvenNumber)'
+                2 == 1 || self.replicasAllowEvenNumber ) || has(self.replication.replicaFromExternal)'
           status:
             description: MariaDBStatus defines the observed state of MariaDB
             properties:
