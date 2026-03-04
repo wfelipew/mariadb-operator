@@ -1631,6 +1631,12 @@ spec:
             description: ExternalMariaDBSpec defines the desired state of an External
               MariaDB
             properties:
+              binlogPort:
+                description: Binlog proxy router port of the external MariaDB. Useful
+                  when the external MariaDB is behind a Maxscale and using the Binlogrouter
+                  to expose the binlog stream.
+                format: int32
+                type: integer
               connection:
                 description: Connection defines a template to configure a Connection
                   for the external MariaDB.
@@ -6867,6 +6873,21 @@ spec:
                         - CurrentPos
                         - SlavePos
                         type: string
+                      ignoreMaxLagSeconds:
+                        description: |-
+                          IgnoreMaxLagSeconds is to ignore the lag behind primary checks.
+                          It's useful on situations when is preferred to keep sending read queries on a delayed (or with connection issues)
+                          replica than stopping sending traffic. It could be useful when replicating from a external MariaDB when
+                          connection issues with primary could happen.
+                          If not provided, it defaults to false.
+                        type: boolean
+                      ignoreReplicationLivenessProbes:
+                        description: |-
+                          IgnoreReplicationLivenessProbes is to ignore liveness replication checks.
+                          It's useful on situations when is preferred to keep sending read queries on a broken replicas
+                          replica than stopping sending traffic.
+                          If not provided, it defaults to false.
+                        type: boolean
                       maxLagSeconds:
                         description: |-
                           MaxLagSeconds is the maximum number of seconds that replicas are allowed to lag behind the primary.
@@ -11844,6 +11865,9 @@ spec:
                   be scheduled.
                 format: date-time
                 type: string
+              scheduleFailureCount:
+                description: ScheduleFailureCount is the schedule failure counter.
+                type: integer
             type: object
         type: object
     served: true

@@ -21,22 +21,23 @@ import (
 
 type BackupOpts struct {
 	CommandOpts
-	Path                 string
-	TargetFilePath       string
-	OmitCredentials      bool
-	CleanupTargetFile    bool
-	MaxRetentionDuration time.Duration
-	TargetTime           time.Time
-	Compression          mariadbv1alpha1.CompressAlgorithm
-	S3                   bool
-	S3Bucket             string
-	S3Endpoint           string
-	S3Region             string
-	S3TLS                bool
-	S3CACertPath         string
-	S3Prefix             string
-	LogLevel             string
-	ExtraOpts            []string
+	Path                   string
+	TargetFilePath         string
+	OmitCredentials        bool
+	CleanupTargetFile      bool
+	MaxRetentionDuration   time.Duration
+	TargetTime             time.Time
+	TargetTimeAgeThreshold *time.Time
+	Compression            mariadbv1alpha1.CompressAlgorithm
+	S3                     bool
+	S3Bucket               string
+	S3Endpoint             string
+	S3Region               string
+	S3TLS                  bool
+	S3CACertPath           string
+	S3Prefix               string
+	LogLevel               string
+	ExtraOpts              []string
 }
 
 type BackupOpt func(*BackupOpts)
@@ -69,6 +70,12 @@ func WithBackupMaxRetention(d time.Duration) BackupOpt {
 func WithBackupTargetTime(t time.Time) BackupOpt {
 	return func(bo *BackupOpts) {
 		bo.TargetTime = t
+	}
+}
+
+func WithBackupTargetTimeAgeThreshold(threshold *time.Time) BackupOpt {
+	return func(bo *BackupOpts) {
+		bo.TargetTimeAgeThreshold = threshold
 	}
 }
 
@@ -288,6 +295,14 @@ func (b *BackupCommand) MariadbOperatorRestore(backupContentType mariadbv1alpha1
 		"--backup-content-type",
 		string(backupContentType),
 	}
+
+	if b.TargetTimeAgeThreshold != nil {
+		args = append(args, []string{
+			"--target-time-age-threshold",
+			backuppkg.FormatBackupDate(*b.TargetTimeAgeThreshold),
+		}...)
+	}
+
 	if backupContentType == mariadbv1alpha1.BackupContentTypePhysical && backupDirPath != nil {
 		args = append(args, []string{
 			"--physical-backup-dir-path",

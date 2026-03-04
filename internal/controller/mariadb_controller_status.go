@@ -139,19 +139,20 @@ func (r *MariaDBReconciler) getReplicationRoles(ctx context.Context,
 		role := mariadbv1alpha1.ReplicationRoleUnknown
 		if isReplica {
 			// role = mariadbv1alpha1.ReplicationRoleReplica
-			replicationHealthy, _ := client.IsReplicationHealthy(ctx)
-			replicationStatus, _ := client.GetReplicationStatus(ctx)
+			// replicationHealthy, _ := client.IsReplicationHealthy(ctx)
+			// replicationStatus, _ := client.GetReplicationStatus(ctx)
+			role = mariadbv1alpha1.ReplicationRoleReplica
 
-			if replicationHealthy {
-				role = mariadbv1alpha1.ReplicationRoleReplica
-			} else {
+			// if replicationHealthy {
+			// 	role = mariadbv1alpha1.ReplicationRoleReplica
+			// } else {
 
-				if IsReplicationPermanentBroken(replicationStatus) {
-					role = mariadbv1alpha1.ReplicationRoleReplicaPermanentBroken
-				} else {
-					role = mariadbv1alpha1.ReplicationRoleReplicaBroken
-				}
-			}
+			// 	if IsReplicationPermanentBroken(replicationStatus) {
+			// 		role = mariadbv1alpha1.ReplicationRoleReplicaPermanentBroken
+			// 	} else {
+			// 		role = mariadbv1alpha1.ReplicationRoleReplicaBroken
+			// 	}
+			// }
 		} else if hasConnectedReplicas {
 			role = mariadbv1alpha1.ReplicationRolePrimary
 		}
@@ -181,8 +182,10 @@ func (r *MariaDBReconciler) getReplicaStatus(ctx context.Context,
 	defer clientSet.Close()
 
 	var replicaStatus map[string]mariadbv1alpha1.ReplicaStatus
+	replication := mdb.Replication()
 	for i := 0; i < int(mdb.Spec.Replicas); i++ {
-		if i == *mdb.Status.CurrentPrimaryPodIndex {
+
+		if i == *mdb.Status.CurrentPrimaryPodIndex && !replication.IsExternalReplication() {
 			continue
 		}
 		pod := stspkg.PodName(mdb.ObjectMeta, i)

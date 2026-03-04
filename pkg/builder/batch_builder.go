@@ -393,14 +393,15 @@ func (b *Builder) BuildRestoreJob(key types.NamespacedName, restore *mariadbv1al
 }
 
 type PhysicalBackupRestoreOpts struct {
-	TargetRecoveryTime *time.Time
-	Volume             *mariadbv1alpha1.StorageVolumeSource
-	S3                 *mariadbv1alpha1.S3
-	RestoreJob         *mariadbv1alpha1.Job
-	RestoreCommandOpts []command.MariaDBBackupRestoreOpt
-	MariaDBLabels      *bool
-	Affinity           *bool
-	NodeSelector       map[string]string
+	TargetRecoveryTime             *time.Time
+	TargetRecoveryTimeAgeThreshold *time.Time
+	Volume                         *mariadbv1alpha1.StorageVolumeSource
+	S3                             *mariadbv1alpha1.S3
+	RestoreJob                     *mariadbv1alpha1.Job
+	RestoreCommandOpts             []command.MariaDBBackupRestoreOpt
+	MariaDBLabels                  *bool
+	Affinity                       *bool
+	NodeSelector                   map[string]string
 }
 
 type PhysicalBackupRestoreOpt func(*PhysicalBackupRestoreOpts) error
@@ -442,6 +443,16 @@ func WithReplicaRecovery(podToRecover *corev1.Pod) PhysicalBackupRestoreOpt {
 		opts.NodeSelector = map[string]string{
 			mdbmetadata.KubernetesHostnameLabel: podToRecover.Spec.NodeName,
 		}
+		return nil
+	}
+}
+
+func WithAgeThreshold(ageThreshold *time.Time) PhysicalBackupRestoreOpt {
+	return func(opts *PhysicalBackupRestoreOpts) error {
+		// By default, the restore job will be executed using just the target recovery time.
+		// If an age threshold is provided, the job will fail if the most recent backup time is too old.
+		opts.TargetRecoveryTimeAgeThreshold = ageThreshold
+
 		return nil
 	}
 }
@@ -490,6 +501,11 @@ func (b *Builder) BuildPhysicalBackupRestoreJob(key types.NamespacedName, mariad
 		command.WithBackupTargetTime(*opts.TargetRecoveryTime),
 		command.WithOmitCredentials(true),
 	}
+
+	if opts.TargetRecoveryTimeAgeThreshold != nil {
+		cmdOpts = append(cmdOpts, command.WithBackupTargetTimeAgeThreshold(opts.TargetRecoveryTimeAgeThreshold))
+	}
+
 	cmdOpts = append(cmdOpts, s3Opts(opts.S3)...)
 
 	cmd, err := command.NewBackupCommand(cmdOpts...)

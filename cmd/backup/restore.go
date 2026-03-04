@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	physicalBackupDirPath string
-	targetTimeRaw         string
+	physicalBackupDirPath     string
+	targetTimeRaw             string
+	targetTimeAgeThresholdRaw string
 )
 
 func init() {
@@ -22,6 +23,8 @@ func init() {
 		"Directory path where the physical backup has been prepared. Only considered when backup-content-type is Physical.")
 	restoreCommand.Flags().StringVar(&targetTimeRaw, "target-time", "",
 		"RFC3339 (1970-01-01T00:00:00Z) date and time that defines the backup target time.")
+	restoreCommand.Flags().StringVar(&targetTimeAgeThresholdRaw, "target-time-age-threshold", "",
+		"RFC3339 (1970-01-01T00:00:00Z) date and time that defines the target time age threshold.")
 }
 
 var restoreCommand = &cobra.Command{
@@ -67,17 +70,38 @@ var restoreCommand = &cobra.Command{
 		}
 		logger.Info("obtained target time", "time", targetTime.String())
 
+		targetTimeAgeThreshold, err := getTargetTimeAgeThreshold()
+		if err != nil {
+			logger.Error(err, "error getting target time age threshold")
+			os.Exit(1)
+		}
+		if targetTimeAgeThreshold != nil {
+			logger.Info("obtained target time age threshold", "threshold", targetTimeAgeThreshold.String())
+		} else {
+			logger.Info("no target time age threshold provided")
+		}
+
 		backupFileNames, err := backupStorage.List(ctx)
 		if err != nil {
 			logger.Error(err, "error listing backup files")
 			os.Exit(1)
 		}
-
-		backupTargetFile, err := backupProcessor.GetBackupTargetFile(backupFileNames, targetTime, logger.WithName("target-recovery-time"))
+		logger.Error(nil, "-------> listing backup files:", "files", backupFileNames)
+		backupTargetFile, err := backupProcessor.GetBackupTargetFile(backupFileNames, targetTime,
+			targetTimeAgeThreshold, logger.WithName("target-recovery-time"))
 		if err != nil {
 			logger.Error(err, "error reading getting target backup")
 			os.Exit(1)
 		}
+		// if targetTimeAgeThreshold != nil {
+		// 	backupTargetFileAge, err := backupProcessor.parseDateInBackupFile(backupTargetFile)
+		// 	if err != nil {
+		// 		logger.Error(err, "error getting backup file age", "file", backupTargetFile)
+		// 		os.Exit(1)
+		// 	}
+		// 	logger.Info("obtained target backup file age", "age", backupTargetFileAge.String())
+		// }
+
 		logger.Info("obtained target backup", "file", backupTargetFile)
 
 		logger.Info("pulling target backup", "file", backupTargetFile, "prefix", s3Prefix)
@@ -126,6 +150,17 @@ func getTargetTime() (time.Time, error) {
 		return time.Now(), nil
 	}
 	return backup.ParseBackupDate(targetTimeRaw)
+}
+
+func getTargetTimeAgeThreshold() (*time.Time, error) {
+	if targetTimeAgeThresholdRaw == "" {
+		return nil, nil
+	}
+	t, err := backup.ParseBackupDate(targetTimeAgeThresholdRaw)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing target time age threshold: %v", err)
+	}
+	return &t, nil
 }
 
 func writeTargetFile(backupTargetFile string) error {

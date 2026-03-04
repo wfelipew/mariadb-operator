@@ -949,6 +949,9 @@ spec:
                   be scheduled.
                 format: date-time
                 type: string
+              scheduleFailureCount:
+                description: ScheduleFailureCount is the schedule failure counter.
+                type: integer
             type: object
         type: object
     served: true

@@ -166,6 +166,10 @@ func (r *MariaDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Reconcile: r.reconcileScaleOut,
 		},
 		{
+			Name:      "Service",
+			Reconcile: r.reconcileService,
+		},
+		{
 			Name:      "Replica recovery",
 			Reconcile: r.reconcileReplicaRecovery,
 		},
@@ -181,9 +185,10 @@ func (r *MariaDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Name:      "PodDisruptionBudget",
 			Reconcile: r.reconcilePodDisruptionBudget,
 		},
+
 		{
-			Name:      "Service",
-			Reconcile: r.reconcileService,
+			Name:      "External Repl Init",
+			Reconcile: r.reconcileExternalReplInit,
 		},
 		{
 			Name:      "Replication",
@@ -959,7 +964,7 @@ func (r *MariaDBReconciler) getTargetVolumeSnapshot(ctx context.Context, backup 
 	recoveryTime := ptr.Deref(targetRecoveryTime, metav1.Time{Time: time.Now()})
 	logger := log.FromContext(ctx).WithName("snapshot")
 
-	targetSnapshot, err := r.BackupProcessor.GetBackupTargetFile(snapshotNames, recoveryTime.Time, logger)
+	targetSnapshot, err := r.BackupProcessor.GetBackupTargetFile(snapshotNames, recoveryTime.Time, nil, logger)
 	if err != nil {
 		return "", fmt.Errorf("error getting target VolumeSnapshot: %v", err)
 	}

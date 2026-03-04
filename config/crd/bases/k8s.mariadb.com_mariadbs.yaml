@@ -4715,6 +4715,21 @@ spec:
                         - CurrentPos
                         - SlavePos
                         type: string
+                      ignoreMaxLagSeconds:
+                        description: |-
+                          IgnoreMaxLagSeconds is to ignore the lag behind primary checks.
+                          It's useful on situations when is preferred to keep sending read queries on a delayed (or with connection issues)
+                          replica than stopping sending traffic. It could be useful when replicating from a external MariaDB when
+                          connection issues with primary could happen.
+                          If not provided, it defaults to false.
+                        type: boolean
+                      ignoreReplicationLivenessProbes:
+                        description: |-
+                          IgnoreReplicationLivenessProbes is to ignore liveness replication checks.
+                          It's useful on situations when is preferred to keep sending read queries on a broken replicas
+                          replica than stopping sending traffic.
+                          If not provided, it defaults to false.
+                        type: boolean
                       maxLagSeconds:
                         description: |-
                           MaxLagSeconds is the maximum number of seconds that replicas are allowed to lag behind the primary.

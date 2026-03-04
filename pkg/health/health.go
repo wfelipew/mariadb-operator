@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/v25/api/v1alpha1"
 	labels "github.com/mariadb-operator/mariadb-operator/v25/pkg/builder/labels"
@@ -145,9 +146,18 @@ func secondaryPodHealthyIndex(ctx context.Context, client ctrlclient.Client, mar
 		if err != nil {
 			return nil, fmt.Errorf("error getting index for Pod '%s': %v", p.Name, err)
 		}
-		if isHealthy(&p) {
+		IOStatusRunning := mariadb.Status.Replication.Replicas[p.Name].SlaveIORunning
+		SQLSatusRunning := mariadb.Status.Replication.Replicas[p.Name].SlaveSQLRunning
+		LastErrorTransitionTime := mariadb.Status.Replication.Replicas[p.Name].LastErrorTransitionTime
+
+		/*To avoid issues with false transients we'll only consider a replica healthy after 3 minutes of stability*/
+		stableMinDuration, _ := time.ParseDuration("120s")
+		// stableMinDuration, _ := time.ParseDuration("0s")
+
+		if isHealthy(&p) && *IOStatusRunning && *SQLSatusRunning && time.Since(LastErrorTransitionTime.Time) > stableMinDuration {
 			return index, nil
 		}
+
 	}
 	return nil, ErrNoHealthyInstancesAvailable
 }

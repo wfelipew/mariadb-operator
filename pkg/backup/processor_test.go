@@ -142,7 +142,7 @@ func TestLogicalGetTargetFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			file, err := p.GetBackupTargetFile(tt.backupFiles, tt.targetRecovery, logger)
+			file, err := p.GetBackupTargetFile(tt.backupFiles, tt.targetRecovery, nil, logger)
 			if err != nil && !tt.wantErr {
 				t.Fatalf("unexpected error getting target recovery file: %v", err)
 			}
@@ -338,7 +338,7 @@ func TestLogicalIsValidBackupFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			valid := p.IsValidBackupFile(tt.backupFile)
+			valid := p.IsValidBackupFile(tt.backupFile, logger)
 			if tt.wantValid != valid {
 				t.Fatalf("unexpected backup file validity, expected: %v got: %v", tt.wantValid, valid)
 			}
@@ -620,7 +620,7 @@ func TestPhysicalGetTargetFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			file, err := p.GetBackupTargetFile(tt.backupFiles, tt.targetRecovery, logger)
+			file, err := p.GetBackupTargetFile(tt.backupFiles, tt.targetRecovery, nil, logger)
 			if err != nil && !tt.wantErr {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -849,7 +849,7 @@ func TestPhysicalIsValidBackupFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			valid := p.IsValidBackupFile(tt.backupFile)
+			valid := p.IsValidBackupFile(tt.backupFile, logger)
 			if tt.wantValid != valid {
 				t.Fatalf("unexpected backup file validity, expected: %v got: %v", tt.wantValid, valid)
 			}
@@ -1106,7 +1106,7 @@ func TestSnapshotGetTargetFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			file, err := p.GetBackupTargetFile(tt.backupFiles, tt.targetRecovery, logger)
+			file, err := p.GetBackupTargetFile(tt.backupFiles, tt.targetRecovery, nil, logger)
 			if err != nil && !tt.wantErr {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -1292,7 +1292,7 @@ func TestSnapshotIsValidBackupFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			valid := p.IsValidBackupFile(tt.backupFile)
+			valid := p.IsValidBackupFile(tt.backupFile, logger)
 			if tt.wantValid != valid {
 				t.Fatalf("unexpected backup file validity, expected: %v got: %v", tt.wantValid, valid)
 			}

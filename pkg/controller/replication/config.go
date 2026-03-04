@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"strconv"
-	"time"
 
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/v25/api/v1alpha1"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/builder"
@@ -17,10 +15,6 @@ import (
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/refresolver"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/sql"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/statefulset"
-	"golang.org/x/mod/semver"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -151,51 +145,51 @@ func (r *ReplicationConfigClient) ConfigureReplica(ctx context.Context, mariadb 
 func (r *ReplicationConfigClient) configureExternalReplica(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
 	replicaPodIndex int) (bool, error) {
 
-	replication := mariadb.Replication()
-	emdb, err := r.refResolver.ExternalMariaDB(ctx, &replication.ReplicaFromExternal.MariaDBRef, mariadb.Namespace)
-	if err != nil {
-		return false, fmt.Errorf("error getting external MariaDB object: %v", err)
-	}
-	key := types.NamespacedName{
-		Name:      emdb.Name,
-		Namespace: emdb.Namespace,
-	}
-	// Check if a viable backup already exists
-	var isBackupInvalid = false
-	var binlogExpireLogsDuration time.Duration
-	var existingBackup mariadbv1alpha1.Backup
+	// replication := mariadb.Replication()
+	// emdb, err := r.refResolver.ExternalMariaDB(ctx, &replication.ReplicaFromExternal.MariaDBRef, mariadb.Namespace)
+	// if err != nil {
+	// 	return false, fmt.Errorf("error getting external MariaDB object: %v", err)
+	// }
+	// key := types.NamespacedName{
+	// 	Name:      emdb.Name,
+	// 	Namespace: emdb.Namespace,
+	// }
+	// // Check if a viable backup already exists
+	// var isBackupInvalid = false
+	// var binlogExpireLogsDuration time.Duration
+	// var existingBackup mariadbv1alpha1.Backup
 
-	if binlogExpireLogsDuration, err = getBinlogExpireLogsDuration(emdb, ctx, r.refResolver); err != nil {
-		return false, fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
-	}
-	err = r.Get(ctx, key, &existingBackup)
-	if err == nil {
-		isBackupInvalid = invalidateBackup(existingBackup, ctx, binlogExpireLogsDuration, *r)
-	}
-	// Create a new backup if required
-	if err != nil || isBackupInvalid {
-		return false, newBackup(emdb, *r, ctx, binlogExpireLogsDuration, mariadb.GetImagePullSecrets(), mariadb.Spec.Storage.Size)
-	}
+	// if binlogExpireLogsDuration, err = getBinlogExpireLogsDuration(emdb, ctx, r.refResolver); err != nil {
+	// 	return false, fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+	// }
+	// err = r.Get(ctx, key, &existingBackup)
+	// if err == nil {
+	// 	isBackupInvalid = invalidateBackup(existingBackup, ctx, binlogExpireLogsDuration, *r)
+	// }
+	// // Create a new backup if required
+	// if err != nil || isBackupInvalid {
+	// 	return false, newBackup(emdb, *r, ctx, binlogExpireLogsDuration, mariadb.GetImagePullSecrets(), mariadb.Spec.Storage.Size)
+	// }
 
-	if !existingBackup.IsComplete() {
-		return false, nil
-	}
+	// if !existingBackup.IsComplete() {
+	// 	return false, nil
+	// }
 
-	var existingRestore mariadbv1alpha1.Restore
-	err = r.Get(ctx, mariadb.RestoreKeyInPod(replicaPodIndex), &existingRestore)
+	// var existingRestore mariadbv1alpha1.Restore
+	// err := r.Get(ctx, mariadb.RestoreKeyInPod(replicaPodIndex), &existingRestore)
 
-	if err == nil && !existingRestore.IsComplete() {
-		return false, nil
-	}
+	// if err == nil && !existingRestore.IsComplete() {
+	// 	return false, nil
+	// }
 
-	if !existingRestore.IsComplete() {
-		// Restore/Bootstrap node from backup
-		return false, newRestore(mariadb, *r, ctx, replicaPodIndex)
-	}
+	// if !existingRestore.IsComplete() {
+	// 	// Restore/Bootstrap node from backup
+	// 	return false, newRestore(mariadb, *r, ctx, replicaPodIndex)
+	// }
 
-	if err := r.Delete(ctx, &existingRestore); err != nil {
-		return false, fmt.Errorf("error deleting Restore: %v", err)
-	}
+	// if err := r.Delete(ctx, &existingRestore); err != nil {
+	// 	return false, fmt.Errorf("error deleting Restore: %v", err)
+	// }
 
 	return true, nil
 }
@@ -266,8 +260,12 @@ func (r *ReplicationConfigClient) changeMaster(ctx context.Context, mariadb *mar
 			sql.WithChangeMasterHost(
 				emdb.GetHost(),
 			),
-			sql.WithChangeMasterPort(emdb.GetPort()),
 			sql.WithChangeMasterCredentials(emdb.GetSUName(), password),
+		}
+		if emdb.GetBinlogProxyPort() != nil {
+			changeMasterOpts = append(changeMasterOpts, sql.WithChangeMasterPort(*emdb.GetBinlogProxyPort()))
+		} else {
+			changeMasterOpts = append(changeMasterOpts, sql.WithChangeMasterPort(emdb.GetPort()))
 		}
 	}
 
@@ -440,9 +438,9 @@ func serverId(podName string) (int, error) {
 func externalReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB, r *refresolver.RefResolver,
 	ctx context.Context) (mariadbv1alpha1.SecretKeySelector, error) {
 	replication := mariadb.Replication()
-	if mariadb.Replication().Enabled && mariadb.Replication().Replica.ReplPasswordSecretKeyRef != nil {
-		return mariadb.Replication().Replica.ReplPasswordSecretKeyRef.SecretKeySelector, nil
-	}
+	// if mariadb.Replication().Enabled && mariadb.Replication().Replica.ReplPasswordSecretKeyRef != nil {
+	// 	return mariadb.Replication().Replica.ReplPasswordSecretKeyRef.SecretKeySelector, nil
+	// }
 	if replication.IsExternalReplication() {
 		emdbRef := replication.GetExternalReplicationRef()
 		emdb, err := r.ExternalMariaDB(ctx, &emdbRef, mariadb.Namespace)
@@ -478,112 +476,60 @@ func createTpl(name, t string) *template.Template {
 	return template.Must(template.New(name).Parse(t))
 }
 
-func newRestore(mariadb *mariadbv1alpha1.MariaDB, r ReplicationConfigClient, ctx context.Context, replicaPodIndex int) error {
-	restoreOpts := builder.RestoreOpts{
-		PodIndex: &replicaPodIndex,
-	}
-	restore, err := r.builder.BuildRestore(mariadb, mariadb.RestoreKeyInPod(replicaPodIndex), restoreOpts)
-	if err != nil {
-		return fmt.Errorf("error building Restore object: %v", err)
-	}
-	if err := r.Create(ctx, restore); err != nil {
-		return fmt.Errorf("error creating Restore object: %v", err)
-	}
-	// return fmt.Errorf("CREATING Restore object: %v", restore.Name)
-	return nil
-}
+// func newRestore(mariadb *mariadbv1alpha1.MariaDB, r ReplicationConfigClient, ctx context.Context, replicaPodIndex int) error {
+// 	restoreOpts := builder.RestoreOpts{
+// 		PodIndex: &replicaPodIndex,
+// 	}
+// 	restore, err := r.builder.BuildRestore(mariadb, mariadb.RestoreKeyInPod(replicaPodIndex), restoreOpts)
+// 	if err != nil {
+// 		return fmt.Errorf("error building Restore object: %v", err)
+// 	}
+// 	if err := r.Create(ctx, restore); err != nil {
+// 		return fmt.Errorf("error creating Restore object: %v", err)
+// 	}
+// 	// return fmt.Errorf("CREATING Restore object: %v", restore.Name)
+// 	return nil
+// }
 
-func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r ReplicationConfigClient, ctx context.Context,
-	binlogExpireLogsDuration time.Duration, imagePullSecrets []mariadbv1alpha1.LocalObjectReference,
-	size *resource.Quantity) error {
+// func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx context.Context,
+// 	refResolver *refresolver.RefResolver) (time.Duration, error) {
+// 	var external_client *sql.Client
+// 	var err error
+// 	if external_client, err = sql.NewClientWithMariaDB(ctx, emdb, refResolver); err != nil {
+// 		return time.Duration(0), fmt.Errorf("error getting external MariaDB client: %v", err)
+// 	}
+// 	defer external_client.Close()
 
-	key := types.NamespacedName{
-		Name:      emdb.Name,
-		Namespace: emdb.Namespace,
-	}
-	backupOps := builder.BackupOpts{
-		Metadata: []*mariadbv1alpha1.Metadata{emdb.Spec.InheritMetadata},
-		Key:      key,
-		MariaDBRef: mariadbv1alpha1.MariaDBRef{
-			ObjectReference: mariadbv1alpha1.ObjectReference{
-				Name: emdb.Name,
-			},
-			Kind: mariadbv1alpha1.ExternalMariaDBKind,
-		},
-		Args: []string{
-			"--master-data=1",
-			"--gtid",
-			"--verbose",
-			"--all-databases",
-			"--single-transaction",
-			"--ignore-table=mysql.global_priv",
-		},
-		Compression: mariadbv1alpha1.CompressGzip,
-		Storage: mariadbv1alpha1.BackupStorage{
-			PersistentVolumeClaim: &mariadbv1alpha1.PersistentVolumeClaimSpec{
-				AccessModes: []v1.PersistentVolumeAccessMode{
-					v1.ReadWriteOnce,
-				},
-				Resources: v1.VolumeResourceRequirements{
-					Requests: v1.ResourceList{
-						"storage": *size,
-					},
-				},
-			},
-		},
-		MaxRetention:     binlogExpireLogsDuration,
-		ImagePullSecrets: imagePullSecrets,
-	}
+// 	var binlogExpireLogsSecondsStr string
+// 	var binlogExpireLogsSeconds int
 
-	backup, err := r.builder.BuildBackup(backupOps, emdb)
-	if err != nil {
-		return fmt.Errorf("error building Backup object: %v", err)
-	}
-	if err := r.Create(ctx, backup); err != nil {
-		return fmt.Errorf("error creating base Backup: %v", err)
-	}
-	return nil
-}
+// 	if semver.Compare(emdb.Status.Version, "10.6.1") >= 0 {
+// 		binlogExpireLogsSecondsStr, err = external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
+// 		if err != nil {
+// 			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+// 		}
+// 		binlogExpireLogsSeconds, _ = strconv.Atoi(binlogExpireLogsSecondsStr)
+// 	} else {
+// 		binlogExpireLogsDaysStr, err := external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
+// 		if err != nil {
+// 			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+// 		}
+// 		binlogExpireLogsDays, _ := strconv.Atoi(binlogExpireLogsDaysStr)
+// 		binlogExpireLogsSeconds = binlogExpireLogsDays * 86400
+// 	}
 
-func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx context.Context,
-	refResolver *refresolver.RefResolver) (time.Duration, error) {
-	var external_client *sql.Client
-	var err error
-	if external_client, err = sql.NewClientWithMariaDB(ctx, emdb, refResolver); err != nil {
-		return time.Duration(0), fmt.Errorf("error getting external MariaDB client: %v", err)
-	}
-	defer external_client.Close()
+// 	return time.Duration(binlogExpireLogsSeconds) * time.Second, nil
+// }
 
-	var binlogExpireLogsSecondsStr string
-	var binlogExpireLogsSeconds int
-
-	if semver.Compare(emdb.Status.Version, "10.6.1") >= 0 {
-		binlogExpireLogsSecondsStr, err = external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
-		if err != nil {
-			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
-		}
-		binlogExpireLogsSeconds, _ = strconv.Atoi(binlogExpireLogsSecondsStr)
-	} else {
-		binlogExpireLogsDaysStr, err := external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
-		if err != nil {
-			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
-		}
-		binlogExpireLogsDays, _ := strconv.Atoi(binlogExpireLogsDaysStr)
-		binlogExpireLogsSeconds = binlogExpireLogsDays * 86400
-	}
-
-	return time.Duration(binlogExpireLogsSeconds) * time.Second, nil
-}
-
-func invalidateBackup(existingBackup mariadbv1alpha1.Backup, ctx context.Context,
-	binlogExpireLogsDuration time.Duration, r ReplicationConfigClient) bool {
-	if time.Since(existingBackup.CreationTimestamp.Time) > binlogExpireLogsDuration {
-		if err := r.Delete(ctx, &existingBackup); err == nil {
-			return true
-		}
-	}
-	return false
-}
+// func invalidateBackup(existingBackup mariadbv1alpha1.Backup, ctx context.Context,
+// 	binlogExpireLogsDuration time.Duration, r ReplicationReconciler) bool {
+// 	if time.Since(existingBackup.CreationTimestamp.Time) > binlogExpireLogsDuration {
+// 		if err := r.Delete(ctx, &existingBackup); err == nil {
+// 			return true
+// 		}
+// 	}
+// 	return false
+// }
 
 // func newReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB) mariadbv1alpha1.GeneratedSecretKeyRef {
 // 	if mariadb.Replication().Enabled && mariadb.Replication().Replica.ReplPasswordSecretKeyRef != nil {

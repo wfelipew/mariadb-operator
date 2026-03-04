@@ -171,6 +171,21 @@ type ReplicaReplication struct {
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:number"}
 	MaxLagSeconds *int `json:"maxLagSeconds,omitempty"`
+	// IgnoreMaxLagSeconds is to ignore the lag behind primary checks.
+	// It's useful on situations when is preferred to keep sending read queries on a delayed (or with connection issues)
+	// replica than stopping sending traffic. It could be useful when replicating from a external MariaDB when
+	// connection issues with primary could happen.
+	// If not provided, it defaults to false.
+	// +optional
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:number"}
+	IgnoreMaxLagSeconds *bool `json:"ignoreMaxLagSeconds,omitempty"`
+	// IgnoreReplicationLivenessProbes is to ignore liveness replication checks.
+	// It's useful on situations when is preferred to keep sending read queries on a broken replicas
+	// replica than stopping sending traffic.
+	// If not provided, it defaults to false.
+	// +optional
+	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:number"}
+	IgnoreReplicationLivenessProbes *bool `json:"ignoreReplicationLivenessProbes,omitempty"`
 	// SyncTimeout defines the timeout for the synchronization phase during switchover and failover operations.
 	// During switchover, all replicas must be synced with the current primary before promoting the new primary.
 	// During failover, the new primary must be synced before being promoted as primary. This implies processing all the events in the relay log.
@@ -411,6 +426,14 @@ func (r *Replication) SetDefaults(mdb *MariaDB, env *environment.OperatorEnv) er
 	r.Primary.SetDefaults()
 	r.Replica.SetDefaults(mdb)
 
+	// Enable ReplicaRecovery by default if it is on external replication
+	if r.IsExternalReplication() && r.Replica.ReplicaRecovery == nil {
+		recovery := ReplicaRecovery{
+			Enabled: true,
+		}
+		r.Replica.ReplicaRecovery = &recovery
+	}
+
 	if r.GtidStrictMode == nil {
 		r.GtidStrictMode = ptr.To(true)
 	}
@@ -493,6 +516,11 @@ func (m *MariaDB) IsReplicaRecoveryEnabled() bool {
 // IsRecoveringReplicas indicates that a replica is being recovered.
 func (m *MariaDB) IsRecoveringReplicas() bool {
 	return meta.IsStatusConditionFalse(m.Status.Conditions, ConditionTypeReplicaRecovered)
+}
+
+// IsGaleraInitialized indicates that the Galera init Job has successfully completed.
+func (m *MariaDB) IsExternalReplInitialized() bool {
+	return meta.IsStatusConditionTrue(m.Status.Conditions, ConditionTypeExternalReplInitialized)
 }
 
 // ReplicaRecoveryError indicates that the MariaDB instance has a replica recovery error.
@@ -639,6 +667,10 @@ type ReplicationStatus struct {
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=status
 	ReplicaToRecover *string `json:"replicaToRecover,omitempty"`
+	// // Replicas is the observed replication status for each replica.
+	// // +optional
+	// // +operator-sdk:csv:customresourcedefinitions:type=status
+	// ExternalReplicasInitStatus map[string]ExternalReplicasInitStatus `json:"externalReplicasInitStatus,omitempty"`
 }
 
 // UseStandaloneProbes indicates whether to use the default non-HA startup and liveness probes.

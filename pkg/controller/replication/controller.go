@@ -19,7 +19,6 @@ import (
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/refresolver"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/sql"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/statefulset"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -154,76 +153,86 @@ func (r *ReplicationReconciler) reconcileReplication(ctx context.Context, req *R
 		return result, err
 	}
 
-	replication := req.mariadb.Replication()
-	isExternalReplication := replication.IsExternalReplication()
+	// replication := req.mariadb.Replication()
+	// isExternalReplication := replication.IsExternalReplication()
+
+	// If external replication, we need to wait for the initial logical backup to be completed
+	// if isExternalReplication {
+
+	// 	if err := r.handleInitialBackup(ctx, req.mariadb, replication, logger); err != nil {
+	// 		return ctrl.Result{}, err
+	// 	}
+
+	// }
 
 	for _, i := range r.replicationPodIndexes(req) {
-		// if result, err := r.ReconcileReplicationInPod(ctx, req, i, logger); !result.IsZero() || err != nil {
-		// 	return result, err
+		if result, err := r.ReconcileReplicationInPod(ctx, req, i, logger); !result.IsZero() || err != nil {
+			return result, err
+		}
+
+		// pod := statefulset.PodName(req.mariadb.ObjectMeta, i)
+		// logger.Error(nil, "reconcileReplication --> ")
+		// if req.mariadb.Status.Replication.Roles == nil {
+		// 	logger.Error(nil, "-------------- req.mariadb.Status.Replication.Roles == nil  ")
+		// 	if _, err := r.ReconcileReplicationInPod(ctx, req, i, logger); err != nil {
+		// 		return ctrl.Result{}, fmt.Errorf("error configuring replication in Pod '%s': %v", pod, err)
+		// 	}
 		// }
 
-		pod := statefulset.PodName(req.mariadb.ObjectMeta, i)
+		// state, ok := req.mariadb.Status.Replication.Roles[pod]
+		// if !ok || state == mariadbv1alpha1.ReplicationRoleUnknown ||
+		// 	state == mariadbv1alpha1.ReplicationRoleReplicaBroken {
+		// 	if _, err := r.ReconcileReplicationInPod(ctx, req, i, logger); err != nil {
+		// 		return ctrl.Result{}, fmt.Errorf("error configuring replication in Pod '%s': %v", pod, err)
+		// 	}
 
-		if req.mariadb.Status.Replication.Roles == nil {
-			if _, err := r.ReconcileReplicationInPod(ctx, req, i, logger); err != nil {
-				return ctrl.Result{}, fmt.Errorf("error configuring replication in Pod '%s': %v", pod, err)
-			}
-		}
+		// }
 
-		state, ok := req.mariadb.Status.Replication.Roles[pod]
-		if !ok || state == mariadbv1alpha1.ReplicationRoleUnknown ||
-			state == mariadbv1alpha1.ReplicationRoleReplicaBroken {
-			if _, err := r.ReconcileReplicationInPod(ctx, req, i, logger); err != nil {
-				return ctrl.Result{}, fmt.Errorf("error configuring replication in Pod '%s': %v", pod, err)
-			}
+		// // Delete POD if it is a permanent issue
+		// if state == mariadbv1alpha1.ReplicationRoleReplicaPermanentBroken && isExternalReplication {
 
-		}
+		// 	// Only one pod should be rebuild at time to avoid complete disruption
+		// 	// if all cluster nodes reach the ReplicationStateSlavePermanentBroken status
+		// 	for pod, status := range req.mariadb.Status.Replication.Roles {
+		// 		if pod == fmt.Sprintf("%s-%d", req.mariadb.Name, i) {
+		// 			continue
+		// 		}
+		// 		if status == mariadbv1alpha1.ReplicationRoleUnknown {
+		// 			return ctrl.Result{},
+		// 				fmt.Errorf("error removing Pod '%s': another Pod is currently being configured, it should works on the next attempts", pod)
+		// 		}
+		// 	}
+		// 	if len(req.mariadb.Status.Replication.Roles) != int(req.mariadb.Spec.Replicas) {
+		// 		return ctrl.Result{}, fmt.Errorf("error removing Pod '%s': another Pod is missing, it should works on the next attempts", pod)
+		// 	}
 
-		// Delete POD if it is a permanent issue
-		if state == mariadbv1alpha1.ReplicationRoleReplicaPermanentBroken && isExternalReplication {
+		// 	// Delete PVC
+		// 	key := types.NamespacedName{
+		// 		Name:      fmt.Sprintf("storage-%s-%d", req.mariadb.Name, i),
+		// 		Namespace: req.mariadb.Namespace,
+		// 	}
+		// 	var existingPvc corev1.PersistentVolumeClaim
+		// 	if err := r.Get(ctx, key, &existingPvc); err != nil {
+		// 		return ctrl.Result{}, fmt.Errorf("error getting pvc from Pod '%s': %v", pod, err)
+		// 	}
+		// 	if err := r.Delete(ctx, &existingPvc); err != nil {
+		// 		return ctrl.Result{}, fmt.Errorf("error deleting pvc from Pod '%s': %v", pod, err)
+		// 	}
 
-			// Only one pod should be rebuild at time to avoid complete disruption
-			// if all cluster nodes reach the ReplicationStateSlavePermanentBroken status
-			for pod, status := range req.mariadb.Status.Replication.Roles {
-				if pod == fmt.Sprintf("%s-%d", req.mariadb.Name, i) {
-					continue
-				}
-				if status == mariadbv1alpha1.ReplicationRoleUnknown {
-					return ctrl.Result{},
-						fmt.Errorf("error removing Pod '%s': another Pod is currently being configured, it should works on the next attempts", pod)
-				}
-			}
-			if len(req.mariadb.Status.Replication.Roles) != int(req.mariadb.Spec.Replicas) {
-				return ctrl.Result{}, fmt.Errorf("error removing Pod '%s': another Pod is missing, it should works on the next attempts", pod)
-			}
+		// 	// Delete POD
+		// 	key = types.NamespacedName{
+		// 		Name:      fmt.Sprintf("%s-%d", req.mariadb.Name, i),
+		// 		Namespace: req.mariadb.Namespace,
+		// 	}
+		// 	var existingPod corev1.Pod
+		// 	if err := r.Get(ctx, key, &existingPod); err != nil {
+		// 		return ctrl.Result{}, fmt.Errorf("error getting Pod '%s': %v", pod, err)
+		// 	}
+		// 	if err := r.Delete(ctx, &existingPod); err != nil {
+		// 		return ctrl.Result{}, fmt.Errorf("error deleting Pod '%s': %v", pod, err)
+		// 	}
 
-			// Delete PVC
-			key := types.NamespacedName{
-				Name:      fmt.Sprintf("storage-%s-%d", req.mariadb.Name, i),
-				Namespace: req.mariadb.Namespace,
-			}
-			var existingPvc corev1.PersistentVolumeClaim
-			if err := r.Get(ctx, key, &existingPvc); err != nil {
-				return ctrl.Result{}, fmt.Errorf("error getting pvc from Pod '%s': %v", pod, err)
-			}
-			if err := r.Delete(ctx, &existingPvc); err != nil {
-				return ctrl.Result{}, fmt.Errorf("error deleting pvc from Pod '%s': %v", pod, err)
-			}
-
-			// Delete POD
-			key = types.NamespacedName{
-				Name:      fmt.Sprintf("%s-%d", req.mariadb.Name, i),
-				Namespace: req.mariadb.Namespace,
-			}
-			var existingPod corev1.Pod
-			if err := r.Get(ctx, key, &existingPod); err != nil {
-				return ctrl.Result{}, fmt.Errorf("error getting Pod '%s': %v", pod, err)
-			}
-			if err := r.Delete(ctx, &existingPod); err != nil {
-				return ctrl.Result{}, fmt.Errorf("error deleting Pod '%s': %v", pod, err)
-			}
-
-		}
+		// }
 	}
 	if !req.mariadb.HasConfiguredReplication() {
 		if err := r.patchStatus(ctx, req.mariadb, func(status *mariadbv1alpha1.MariaDBStatus) {
@@ -243,6 +252,12 @@ func (r *ReplicationReconciler) shouldReconcileReplication(ctx context.Context, 
 	if req.mariadb.Status.CurrentPrimaryPodIndex == nil && !isExternalReplication {
 		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
 	}
+
+	if isExternalReplication && !req.mariadb.IsExternalReplInitialized() {
+		logger.Info("external replication no initialized, trying again in 5s")
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
 	if req.mariadb.IsSwitchingPrimary() {
 		return ctrl.Result{}, nil
 	}
@@ -330,7 +345,7 @@ func (r *ReplicationReconciler) ReconcileReplicationInPod(ctx context.Context, r
 			return ctrl.Result{}, nil
 		}
 	}
-
+	logger.Error(nil, "ReconcileReplicationInPod 22")
 	client, err := req.replClientSet.clientForIndex(ctx, podIndex)
 	if err != nil {
 		logger.V(1).Info("error getting replica client", "err", err, "pod", pod)
@@ -343,6 +358,7 @@ func (r *ReplicationReconciler) ReconcileReplicationInPod(ctx context.Context, r
 		return ctrl.Result{}, fmt.Errorf("error getting replica opts: %v", err)
 	}
 	if err := r.replConfigClient.ConfigureReplica(ctx, req.mariadb, client, primaryPodIndex, podIndex, replicaOpts...); err != nil {
+		logger.Error(err, "error configuring replica")
 		return ctrl.Result{}, fmt.Errorf("error configuring replica: %v", err)
 	}
 	return ctrl.Result{}, nil
