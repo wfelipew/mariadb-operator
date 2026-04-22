@@ -363,7 +363,7 @@ func NewReplicationConfig(env *env.PodEnvironment) ([]byte, error) {
 		return nil, fmt.Errorf("error get serverId offset for external replication: %v", err)
 	}
 
-	if externalReplEnabled && *externalReplServerIdOffset != 0 {
+	if externalReplEnabled && externalReplServerIdOffset != nil {
 		sId, err = offsetServerId(env.PodName, *externalReplServerIdOffset)
 		if err != nil {
 			return nil, fmt.Errorf("error getting server_id with offset server ID: %v", err)

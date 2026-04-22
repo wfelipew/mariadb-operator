@@ -95,7 +95,11 @@ func (tf *SqlFinalizer) Finalize(ctx context.Context, resource Resource) (ctrl.R
 		}
 	} else {
 		for i := 0; i < int(mariadb.GetReplicas()); i++ {
-			mdbInternalClient, err := sqlClient.NewInternalClientWithPodIndex(ctx, mariadb, tf.RefResolver, i)
+			mdbInternalClient, err := sqlClient.NewInternalClientWithPodIndex(ctx, mariadb, tf.RefResolver, i, sqlClient.WithParams(
+				map[string]string{
+					"SQL_LOG_BIN": "OFF",
+				},
+			))
 			if err != nil {
 				return ctrl.Result{}, fmt.Errorf("error connecting to MariaDB: %v", err)
 			}

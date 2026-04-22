@@ -288,16 +288,6 @@ func (r *PhysicalBackupReconciler) createJob(ctx context.Context, backup *mariad
 		failureCount = ptr.To(*failureCount + 1)
 		if errors.Is(err, errPhysicalBackupNoTargetPodsAvailable) {
 			logger.Info("No target Pods available. Requeuing...", "target", backup.Spec.Target, "attemptCount", *failureCount)
-
-			// Throttle status updates - only patch every 5 attempts to avoid watch event storm
-			if *failureCount%5 == 0 {
-				if err := r.patchStatus(ctx, backup, func(status *mariadbv1alpha1.PhysicalBackupStatus) {
-					status.ScheduleFailureCount = failureCount
-				}); err != nil {
-					logger.Info("Error patching status (non-fatal)", "err", err)
-					// Don't return error - we still want to requeue
-				}
-			}
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("error getting target Pod index: %v", err)

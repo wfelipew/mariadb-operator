@@ -107,7 +107,7 @@ func (r *EndpointsReconciler) endpointSlice(ctx context.Context, key types.Names
 	// 	}
 	// }
 	for _, pod := range pods {
-		if mariadb.Status.Replication.Roles[pod.Name] == mariadbv1alpha1.ReplicationRoleUnknown {
+		if mariadb.Status.Replication != nil && mariadb.Status.Replication.Roles[pod.Name] == mariadbv1alpha1.ReplicationRoleUnknown {
 			continue
 		}
 		endpoint, err := buildEndpoint(&pod)

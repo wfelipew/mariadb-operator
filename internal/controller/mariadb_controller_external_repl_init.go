@@ -10,6 +10,7 @@ import (
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/v25/api/v1alpha1"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/builder"
 	condition "github.com/mariadb-operator/mariadb-operator/v25/pkg/condition"
+	"github.com/mariadb-operator/mariadb-operator/v25/pkg/controller/replication"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/refresolver"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/sql"
 	stsobj "github.com/mariadb-operator/mariadb-operator/v25/pkg/statefulset"
@@ -98,8 +99,36 @@ func (r *MariaDBReconciler) reconcileRestoreInPod(ctx context.Context, mariadb *
 
 	logger.Info("reconciling restore in pod", "pod", replicaPodIndex)
 
+	// var client *sql.Client
+	// var err error
+	// if client, err = sql.NewClientWithMariaDB(ctx, mariadb, r.RefResolver); err != nil {
+	// 	logger.Error(err, "error getting MariaDB client")
+	// 	return ctrl.Result{}, fmt.Errorf("error getting MariaDB client: %v", err)
+	// }
+
+	replClientSet, err := replication.NewReplicationClientSet(mariadb, r.RefResolver)
+	if err != nil {
+		logger.Error(err, "error getting replica clientset", "err", err, "pod", replicaPodIndex)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+	}
+
+	client, err := replClientSet.ClientForIndex(ctx, replicaPodIndex)
+	if err != nil {
+		logger.Error(err, "error getting replica client", "err", err, "pod", replicaPodIndex)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+	}
+	defer client.Close()
+
+	// req, err := r.NewReconcileRequest(ctx, mariadb)
+	// client := req.replClientSet.clientForIndex(ctx, replicaPodIndex)
+
+	if err := client.ResetMaster(ctx); err != nil {
+		logger.Error(err, "error reseting master")
+		return ctrl.Result{}, fmt.Errorf("error resetting master: %v", err)
+	}
+
 	var existingRestore mariadbv1alpha1.Restore
-	err := r.Get(ctx, mariadb.RestoreKeyInPod(replicaPodIndex), &existingRestore)
+	err = r.Get(ctx, mariadb.RestoreKeyInPod(replicaPodIndex), &existingRestore)
 
 	if err == nil && !existingRestore.IsComplete() {
 		logger.Info("restore exists, but not complete", "pod", replicaPodIndex)

@@ -107,10 +107,7 @@ spec:
     app.kubernetes.io/instance: mariadb-repl
     app.kubernetes.io/name: mariadb
     statefulset.kubernetes.io/pod-name: mariadb-repl-3
-<<<<<<< HEAD
   publishNotReadyAddresses: true
-  type: LoadBalancer
-=======
   type: LoadBalancer
 ---
 apiVersion: v1
@@ -126,10 +123,19 @@ spec:
     port: 3306
     protocol: TCP
     targetPort: 3306
+  - name: agent
+    port: 5555
+    protocol: TCP
+    targetPort: 5555
+  - name: agent-probe
+    port: 5566
+    protocol: TCP
+    targetPort: 5566
   selector:
     app.kubernetes.io/instance: mariadb-repl-external
     app.kubernetes.io/name: mariadb
     statefulset.kubernetes.io/pod-name: mariadb-repl-external-0
+  publishNotReadyAddresses: true
   type: LoadBalancer
 ---
 apiVersion: v1
@@ -145,10 +151,19 @@ spec:
     port: 3306
     protocol: TCP
     targetPort: 3306
+  - name: agent
+    port: 5555
+    protocol: TCP
+    targetPort: 5555
+  - name: agent-probe
+    port: 5566
+    protocol: TCP
+    targetPort: 5566
   selector:
     app.kubernetes.io/instance: mariadb-repl-external
     app.kubernetes.io/name: mariadb
     statefulset.kubernetes.io/pod-name: mariadb-repl-external-1
+  publishNotReadyAddresses: true
   type: LoadBalancer
 ---
 apiVersion: v1
@@ -164,10 +179,19 @@ spec:
     port: 3306
     protocol: TCP
     targetPort: 3306
+  - name: agent
+    port: 5555
+    protocol: TCP
+    targetPort: 5555
+  - name: agent-probe
+    port: 5566
+    protocol: TCP
+    targetPort: 5566
   selector:
     app.kubernetes.io/instance: mariadb-repl-external
     app.kubernetes.io/name: mariadb
     statefulset.kubernetes.io/pod-name: mariadb-repl-external-2
+  publishNotReadyAddresses: true
   type: LoadBalancer
 ---
 apiVersion: v1
@@ -183,10 +207,18 @@ spec:
     port: 3306
     protocol: TCP
     targetPort: 3306
+  - name: agent
+    port: 5555
+    protocol: TCP
+    targetPort: 5555
+  - name: agent-probe
+    port: 5566
+    protocol: TCP
+    targetPort: 5566
   selector:
     app.kubernetes.io/instance: mariadb-repl-external
     app.kubernetes.io/name: mariadb
     statefulset.kubernetes.io/pod-name: mariadb-repl-external-3
+  publishNotReadyAddresses: true
   type: LoadBalancer
 
->>>>>>> 7cbe532f (Adding support to external replication)

@@ -126,7 +126,12 @@ func (r *SqlReconciler) Reconcile(ctx context.Context, resource Resource) (ctrl.
 		errBundle = multierror.Append(errBundle, err)
 	} else {
 		for i := 0; i < int(mariadb.GetReplicas()); i++ {
-			mdbInternalClient, err := sqlClient.NewInternalClientWithPodIndex(ctx, mariadb, r.RefResolver, i)
+
+			mdbInternalClient, err := sqlClient.NewInternalClientWithPodIndex(ctx, mariadb, r.RefResolver, i, sqlClient.WithParams(
+				map[string]string{
+					"SQL_LOG_BIN": "OFF",
+				},
+			))
 			if err != nil {
 				var errBundle *multierror.Error
 				errBundle = multierror.Append(errBundle, err)

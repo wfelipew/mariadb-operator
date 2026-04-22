@@ -179,7 +179,7 @@ func (e *PodEnvironment) ExternalReplServerIdOffset() (*int, error) {
 		return nil, err
 	}
 	if !extReplEnabled {
-		return nil, errors.New("external replication must be enabled")
+		return nil, nil
 	}
 	offset, err := strconv.Atoi(e.MariaDBExternalReplServerIdOffset)
 	return &offset, err

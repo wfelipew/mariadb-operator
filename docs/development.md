@@ -161,6 +161,7 @@ make test
 ```bash
 make cluster
 make install
+make install-csi-hostpath
 make install-minio
 make net
 make test-int

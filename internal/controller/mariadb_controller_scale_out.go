@@ -193,7 +193,7 @@ func (r *MariaDBReconciler) reconcileReplicaPhysicalBackup(ctx context.Context, 
 	// If backup is already present but expired (backup age >  master binlog_retention) we need to destroy it to force a new backup
 	var binlogExpireLogsDuration time.Duration
 	var binlogExpireErr error
-	var ageThreshold time.Time
+	var ageThreshold *time.Time
 	replication := mariadb.Replication()
 
 	if replication.IsExternalReplication() {
@@ -208,11 +208,12 @@ func (r *MariaDBReconciler) reconcileReplicaPhysicalBackup(ctx context.Context, 
 		binlogExpireLogsDuration, binlogExpireErr = getInternalBinlogExpireLogsDuration(mariadb, ctx, r.RefResolver)
 	}
 
-	if binlogExpireErr == nil {
-		ageThreshold = time.Now().Add(-binlogExpireLogsDuration)
-	} else {
+	if binlogExpireErr == nil && binlogExpireLogsDuration != 0 {
+		ageThreshold = ptr.To(time.Now().Add(-binlogExpireLogsDuration))
+	} else if binlogExpireErr != nil {
 		// In case of failure to get the binlogExpireLogsDuration set ageThresold do now to force a new backup
-		ageThreshold = time.Now()
+		logger.Info("Unable to get binlog_expire_logs_seconds, setting age threshold to now to force new backup", "error", binlogExpireErr)
+		ageThreshold = ptr.To(time.Now())
 	}
 
 	if !physicalBackup.IsComplete() {
@@ -228,7 +229,7 @@ func (r *MariaDBReconciler) reconcileReplicaPhysicalBackup(ctx context.Context, 
 		logger.V(1).Info("Replica PhysicalBackup job not completed. Requeuing")
 		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
 	} else {
-		if physicalBackup.Status.LastScheduleTime.Time.Before(ageThreshold) {
+		if ageThreshold != nil && physicalBackup.Status.LastScheduleTime.Time.Before(*ageThreshold) {
 			logger.Info("Existent backup is expired, destroying to create a new one")
 			if err := r.cleanupPhysicalBackup(ctx, mariadb.PhysicalBackupReplicaRecoveryKey()); err != nil {
 				return ctrl.Result{}, err

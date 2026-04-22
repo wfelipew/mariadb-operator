@@ -355,6 +355,7 @@ func (r *ReplicationReconciler) ReconcileReplicationInPod(ctx context.Context, r
 
 	replicaOpts, err := r.getReplicaOpts(ctx, req, pod, podIndex, logger, reconcilePodOpts...)
 	if err != nil {
+		logger.Error(err, "error gettting replica opts", "error", err, "pod", pod)
 		return ctrl.Result{}, fmt.Errorf("error getting replica opts: %v", err)
 	}
 	if err := r.replConfigClient.ConfigureReplica(ctx, req.mariadb, client, primaryPodIndex, podIndex, replicaOpts...); err != nil {
