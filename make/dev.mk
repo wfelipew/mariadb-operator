@@ -33,7 +33,12 @@ test: envtest ginkgo ## Run unit tests.
 
 .PHONY: test-int-basic
 test-int-basic: envtest ginkgo ## Run integration tests with label 'basic'
-	$(MAKE) TEST_ARGS="--label-filter=basic" test-int
+	$(MAKE) TEST_ARGS="   --focus='MariaDB replication' " test-int
+# 	$(MAKE) TEST_ARGS="   --focus='MariaDB replication from external server with filtered tables' " test-int
+# 	$(MAKE) TEST_ARGS=" -vv  --focus='MariaDB Replica Recovery|MariaDB replication from external server|MariaDB Galera|MariaDB replication' " test-int
+# 	$(MAKE) TEST_ARGS=" --focus='MariaDB Replica Recovery|MariaDB replication from external server|MariaDB replication' " test-int 
+# 	$(MAKE) TEST_ARGS=" --focus='MariaDB replication from external server' " test-int
+# $(MAKE) TEST_ARGS=" --focus='MariaDB Replica Recovery|MariaDB replication from external server|MariaDB Galera|MariaDB replication|Backup|Connection|Database|External MariaDB' " test-int
 
 .PHONY: test-int
 test-int: envtest ginkgo ## Run integration tests.
@@ -74,7 +79,7 @@ release: goreleaser ## Test release locally.
 
 ##@ Run
 
-RUN_FLAGS ?= --log-dev --log-level=info --log-time-encoder=iso8601
+RUN_FLAGS ?= --log-dev --log-level=debug --log-time-encoder=iso8601
 # RUN_FLAGS ?= --log-dev --log-level=info --log-time-encoder=iso8601 --pprof --pprof-addr=$(PPROF_ADDR)
 # RUN_ENV ?= \
 # 	MARIADB_OPERATOR_LOG_DEV=true \

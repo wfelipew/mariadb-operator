@@ -345,7 +345,7 @@ func (r *ReplicationReconciler) ReconcileReplicationInPod(ctx context.Context, r
 			return ctrl.Result{}, nil
 		}
 	}
-	logger.Error(nil, "ReconcileReplicationInPod 22")
+
 	client, err := req.replClientSet.clientForIndex(ctx, podIndex)
 	if err != nil {
 		logger.V(1).Info("error getting replica client", "err", err, "pod", pod)

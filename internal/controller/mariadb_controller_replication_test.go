@@ -770,11 +770,6 @@ var _ = Describe("MariaDB replication from external server with filtered tables"
 				"SELECT 1 FROM information_schema.tables WHERE table_schema='%s' AND table_name='%s'",
 				filteredDB, replicatedTable,
 			))
-			resultdbg, _ := podClient.QueryColumnMaps(testCtx, fmt.Sprintf(
-				"SELECT table_schema,table_name FROM information_schema.tables ",
-			))
-			fmt.Fprintf(GinkgoWriter, "Expected %v.%v \n", filteredDB, replicatedTable)
-			fmt.Fprintf(GinkgoWriter, "Result %v  \n", resultdbg)
 			Expect(err).To(Succeed())
 			Expect(exists).To(BeTrue())
 
@@ -783,12 +778,6 @@ var _ = Describe("MariaDB replication from external server with filtered tables"
 				"SELECT 1 FROM information_schema.tables WHERE table_schema='%s' AND table_name='%s'",
 				filteredDB, excludedTable,
 			))
-			resultdbg2, _ := podClient.QueryColumnMap(testCtx, fmt.Sprintf(
-				"SELECT * FROM information_schema.tables WHERE table_schema='%s' AND table_name='%s'",
-				filteredDB, excludedTable,
-			))
-			fmt.Fprintf(GinkgoWriter, "Not expected %v.%v \n", filteredDB, excludedTable)
-			fmt.Fprintf(GinkgoWriter, "Result %v  \n", resultdbg2["table_name"])
 			Expect(err).To(Succeed())
 			Expect(exists).To(BeFalse())
 
