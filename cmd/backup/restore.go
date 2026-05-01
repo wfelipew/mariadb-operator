@@ -86,21 +86,12 @@ var restoreCommand = &cobra.Command{
 			logger.Error(err, "error listing backup files")
 			os.Exit(1)
 		}
-		logger.Error(nil, "-------> listing backup files:", "files", backupFileNames)
 		backupTargetFile, err := backupProcessor.GetBackupTargetFile(backupFileNames, targetTime,
 			targetTimeAgeThreshold, logger.WithName("target-recovery-time"))
 		if err != nil {
 			logger.Error(err, "error reading getting target backup")
 			os.Exit(1)
 		}
-		// if targetTimeAgeThreshold != nil {
-		// 	backupTargetFileAge, err := backupProcessor.parseDateInBackupFile(backupTargetFile)
-		// 	if err != nil {
-		// 		logger.Error(err, "error getting backup file age", "file", backupTargetFile)
-		// 		os.Exit(1)
-		// 	}
-		// 	logger.Info("obtained target backup file age", "age", backupTargetFileAge.String())
-		// }
 
 		logger.Info("obtained target backup", "file", backupTargetFile)
 

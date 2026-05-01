@@ -300,8 +300,9 @@ spec:
                 - gzip
                 type: string
               databases:
-                description: Databases defines the logical databases to be backed
-                  up. If not provided, all databases are backed up.
+                description: |-
+                  Databases defines the logical databases to be backed up. If not provided, all databases are backed up.
+                  Mutually exclusive with Tables.
                 items:
                   type: string
                 type: array
@@ -1031,6 +1032,13 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              tables:
+                description: |-
+                  Tables defines specific tables to be backed up, in "database.table" format. All entries must
+                  share the same database. Mutually exclusive with Databases.
+                items:
+                  type: string
+                type: array
               timeZone:
                 description: TimeZone defines the timezone associated with the cron
                   expression.
@@ -5552,6 +5560,9 @@ spec:
                   externalTrafficPolicy:
                     description: ExternalTrafficPolicy Service field.
                     type: string
+                  loadBalancerClass:
+                    description: LoadBalancerClass Service field.
+                    type: string
                   loadBalancerIP:
                     description: LoadBalancerIP Service field.
                     type: string
@@ -6870,6 +6881,21 @@ spec:
                         - CurrentPos
                         - SlavePos
                         type: string
+                      ignoreMaxLagSeconds:
+                        description: |-
+                          IgnoreMaxLagSeconds is to ignore the lag behind primary checks.
+                          It's useful on situations when is preferred to keep sending read queries on a delayed (or with connection issues)
+                          replica than stopping sending traffic. It could be useful when replicating from a external MariaDB when
+                          connection issues with primary could happen.
+                          If not provided, it defaults to false.
+                        type: boolean
+                      ignoreReplicationLivenessProbes:
+                        description: |-
+                          IgnoreReplicationLivenessProbes is to ignore liveness replication checks.
+                          It's useful on situations when is preferred to keep sending read queries on a broken replicas
+                          replica than stopping sending traffic.
+                          If not provided, it defaults to false.
+                        type: boolean
                       maxLagSeconds:
                         description: |-
                           MaxLagSeconds is the maximum number of seconds that replicas are allowed to lag behind the primary.
@@ -6929,44 +6955,9 @@ spec:
                           See: https://mariadb.com/docs/server/reference/sql-functions/secondary-functions/miscellaneous-functions/master_gtid_wait
                         type: string
                     type: object
-<<<<<<< HEAD
-                  semiSyncAckTimeout:
-                    description: |-
-                      SemiSyncAckTimeout for the replica to acknowledge transactions to the primary.
-                      It requires semi-synchronous replication to be enabled.
-                      See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/semisynchronous-replication#rpl_semi_sync_master_timeout
-                    type: string
-                  semiSyncEnabled:
-                    description: |-
-                      SemiSyncEnabled determines whether semi-synchronous replication is enabled.
-                      Semi-synchronous replication requires that at least one replica should have sent an ACK to the primary node
-                      before committing the transaction back to the client.
-                      See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/semisynchronous-replication
-                      It is enabled by default
-                    type: boolean
-                  semiSyncWaitPoint:
-                    description: |-
-                      SemiSyncWaitPoint determines whether the transaction should wait for an ACK after having synced the binlog (AfterSync)
-                      or after having committed to the storage engine (AfterCommit, the default).
-                      It requires semi-synchronous replication to be enabled.
-                      See: https://mariadb.com/kb/en/semisynchronous-replication/#rpl_semi_sync_master_wait_point.
-                    enum:
-                    - AfterSync
-                    - AfterCommit
-                    type: string
-                  standaloneProbes:
-                    description: |-
-                      StandaloneProbes indicates whether to use the default non-HA startup and liveness probes.
-                      It is disabled by default
-                    type: boolean
-                  syncBinlog:
-                    description: |-
-                      SyncBinlog indicates after how many events the binary log is synchronized to the disk.
-                      See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/replication-and-binary-log-system-variables#sync_binlog
-=======
                   replicaFromExternal:
-                    description: ReplicaReplication is the replication configuration
-                      for the replica nodes.
+                    description: ReplicaFromExternal specifies whether the replica
+                      should be created from an external MariaDB instance.
                     properties:
                       connectionRetries:
                         description: ConnectionRetries to be used when the replica
@@ -6976,6 +6967,15 @@ spec:
                         description: ConnectionTimeout to be used when the replica
                           connects to the primary.
                         type: string
+                      filteredReplicaTables:
+                        description: |-
+                          FilteredReplicaTables is an optional list of tables in "database.table" format to replicate.
+                          When set, the logical backup will only include these tables and the replication will be
+                          configured with replicate_do_table for each entry. GTID strict mode is automatically
+                          disabled when this field is set, as partial replication is incompatible with it.
+                        items:
+                          type: string
+                        type: array
                       gtid:
                         description: |-
                           Gtid indicates which Global Transaction ID should be used when connecting a replica to the master.
@@ -7010,12 +7010,39 @@ spec:
                     required:
                     - mariaDbRef
                     type: object
+                  semiSyncAckTimeout:
+                    description: |-
+                      SemiSyncAckTimeout for the replica to acknowledge transactions to the primary.
+                      It requires semi-synchronous replication to be enabled.
+                      See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/semisynchronous-replication#rpl_semi_sync_master_timeout
+                    type: string
+                  semiSyncEnabled:
+                    description: |-
+                      SemiSyncEnabled determines whether semi-synchronous replication is enabled.
+                      Semi-synchronous replication requires that at least one replica should have sent an ACK to the primary node
+                      before committing the transaction back to the client.
+                      See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/semisynchronous-replication
+                      It is enabled by default
+                    type: boolean
+                  semiSyncWaitPoint:
+                    description: |-
+                      SemiSyncWaitPoint determines whether the transaction should wait for an ACK after having synced the binlog (AfterSync)
+                      or after having committed to the storage engine (AfterCommit, the default).
+                      It requires semi-synchronous replication to be enabled.
+                      See: https://mariadb.com/kb/en/semisynchronous-replication/#rpl_semi_sync_master_wait_point.
+                    enum:
+                    - AfterSync
+                    - AfterCommit
+                    type: string
+                  standaloneProbes:
+                    description: |-
+                      StandaloneProbes indicates whether to use the default non-HA startup and liveness probes.
+                      It is disabled by default
+                    type: boolean
                   syncBinlog:
                     description: |-
-                      SyncBinlog indicates whether the binary log should be synchronized to the disk after every event.
-                      It trades off performance for consistency.
-                      See: https://mariadb.com/kb/en/replication-and-binary-log-system-variables/#sync_binlog.
->>>>>>> 7cbe532f (Adding support to external replication)
+                      SyncBinlog indicates after how many events the binary log is synchronized to the disk.
+                      See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/replication-and-binary-log-system-variables#sync_binlog
                     type: integer
                 type: object
               resources:
@@ -7149,6 +7176,9 @@ spec:
                   externalTrafficPolicy:
                     description: ExternalTrafficPolicy Service field.
                     type: string
+                  loadBalancerClass:
+                    description: LoadBalancerClass Service field.
+                    type: string
                   loadBalancerIP:
                     description: LoadBalancerIP Service field.
                     type: string
@@ -7232,6 +7262,9 @@ spec:
                     type: boolean
                   externalTrafficPolicy:
                     description: ExternalTrafficPolicy Service field.
+                    type: string
+                  loadBalancerClass:
+                    description: LoadBalancerClass Service field.
                     type: string
                   loadBalancerIP:
                     description: LoadBalancerIP Service field.
@@ -8041,12 +8074,8 @@ spec:
             - message: 'An odd number of MariaDB instances (mariadb.spec.replicas)
                 is required to avoid split brain situations for Galera. Use ''mariadb.spec.replicasAllowEvenNumber:
                 true'' to disable this validation.'
-<<<<<<< HEAD
               rule: '!has(self.galera) || !self.galera.enabled || (self.replicas %
-                2 == 1 || self.replicasAllowEvenNumber)'
-=======
-              rule: self.replicas %2 == 1 || self.replicasAllowEvenNumber || has(self.replication.replicaFromExternal)
->>>>>>> 7cbe532f (Adding support to external replication)
+                2 == 1 || self.replicasAllowEvenNumber ) || has(self.replication.replicaFromExternal)'
           status:
             description: MariaDBStatus defines the observed state of MariaDB
             properties:
@@ -9124,6 +9153,9 @@ spec:
                   externalTrafficPolicy:
                     description: ExternalTrafficPolicy Service field.
                     type: string
+                  loadBalancerClass:
+                    description: LoadBalancerClass Service field.
+                    type: string
                   loadBalancerIP:
                     description: LoadBalancerIP Service field.
                     type: string
@@ -9207,6 +9239,9 @@ spec:
                     type: boolean
                   externalTrafficPolicy:
                     description: ExternalTrafficPolicy Service field.
+                    type: string
+                  loadBalancerClass:
+                    description: LoadBalancerClass Service field.
                     type: string
                   loadBalancerIP:
                     description: LoadBalancerIP Service field.
@@ -11847,6 +11882,9 @@ spec:
                   be scheduled.
                 format: date-time
                 type: string
+              scheduleFailureCount:
+                description: ScheduleFailureCount is the schedule failure counter.
+                type: integer
             type: object
         type: object
     served: true

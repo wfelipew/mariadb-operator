@@ -614,14 +614,11 @@ func (m *MariaDB) IsReplicationSwitchoverRequired() bool {
 type ReplicationRole string
 
 const (
-	ReplicationRolePrimary ReplicationRole = "Primary"
-	ReplicationRoleReplica ReplicationRole = "Replica"
-	ReplicationRoleUnknown ReplicationRole = "Unknown"
-	// ReplicationStateMaster               ReplicationState = "Master"
-	// ReplicationStateSlave                ReplicationState = "Slave"
+	ReplicationRolePrimary                ReplicationRole = "Primary"
+	ReplicationRoleReplica                ReplicationRole = "Replica"
+	ReplicationRoleUnknown                ReplicationRole = "Unknown"
 	ReplicationRoleReplicaBroken          ReplicationRole = "ReplicaBroken"
 	ReplicationRoleReplicaPermanentBroken ReplicationRole = "ReplicaPermanentBroken"
-	// ReplicationStateNotConfigured        ReplicationState = "NotConfigured"
 )
 
 // ReplicaStatusVars is the observed replica status variables.
@@ -701,10 +698,6 @@ type ReplicationStatus struct {
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=status
 	ReplicaToRecover *string `json:"replicaToRecover,omitempty"`
-	// // Replicas is the observed replication status for each replica.
-	// // +optional
-	// // +operator-sdk:csv:customresourcedefinitions:type=status
-	// ExternalReplicasInitStatus map[string]ExternalReplicasInitStatus `json:"externalReplicasInitStatus,omitempty"`
 }
 
 // UseStandaloneProbes indicates whether to use the default non-HA startup and liveness probes.
