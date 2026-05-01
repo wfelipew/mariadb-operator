@@ -614,11 +614,9 @@ func (m *MariaDB) IsReplicationSwitchoverRequired() bool {
 type ReplicationRole string
 
 const (
-	ReplicationRolePrimary                ReplicationRole = "Primary"
-	ReplicationRoleReplica                ReplicationRole = "Replica"
-	ReplicationRoleUnknown                ReplicationRole = "Unknown"
-	ReplicationRoleReplicaBroken          ReplicationRole = "ReplicaBroken"
-	ReplicationRoleReplicaPermanentBroken ReplicationRole = "ReplicaPermanentBroken"
+	ReplicationRolePrimary ReplicationRole = "Primary"
+	ReplicationRoleReplica ReplicationRole = "Replica"
+	ReplicationRoleUnknown ReplicationRole = "Unknown"
 )
 
 // ReplicaStatusVars is the observed replica status variables.

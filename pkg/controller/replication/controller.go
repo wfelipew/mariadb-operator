@@ -153,86 +153,10 @@ func (r *ReplicationReconciler) reconcileReplication(ctx context.Context, req *R
 		return result, err
 	}
 
-	// replication := req.mariadb.Replication()
-	// isExternalReplication := replication.IsExternalReplication()
-
-	// If external replication, we need to wait for the initial logical backup to be completed
-	// if isExternalReplication {
-
-	// 	if err := r.handleInitialBackup(ctx, req.mariadb, replication, logger); err != nil {
-	// 		return ctrl.Result{}, err
-	// 	}
-
-	// }
-
 	for _, i := range r.replicationPodIndexes(req) {
 		if result, err := r.ReconcileReplicationInPod(ctx, req, i, logger); !result.IsZero() || err != nil {
 			return result, err
 		}
-
-		// pod := statefulset.PodName(req.mariadb.ObjectMeta, i)
-		// logger.Error(nil, "reconcileReplication --> ")
-		// if req.mariadb.Status.Replication.Roles == nil {
-		// 	logger.Error(nil, "-------------- req.mariadb.Status.Replication.Roles == nil  ")
-		// 	if _, err := r.ReconcileReplicationInPod(ctx, req, i, logger); err != nil {
-		// 		return ctrl.Result{}, fmt.Errorf("error configuring replication in Pod '%s': %v", pod, err)
-		// 	}
-		// }
-
-		// state, ok := req.mariadb.Status.Replication.Roles[pod]
-		// if !ok || state == mariadbv1alpha1.ReplicationRoleUnknown ||
-		// 	state == mariadbv1alpha1.ReplicationRoleReplicaBroken {
-		// 	if _, err := r.ReconcileReplicationInPod(ctx, req, i, logger); err != nil {
-		// 		return ctrl.Result{}, fmt.Errorf("error configuring replication in Pod '%s': %v", pod, err)
-		// 	}
-
-		// }
-
-		// // Delete POD if it is a permanent issue
-		// if state == mariadbv1alpha1.ReplicationRoleReplicaPermanentBroken && isExternalReplication {
-
-		// 	// Only one pod should be rebuild at time to avoid complete disruption
-		// 	// if all cluster nodes reach the ReplicationStateSlavePermanentBroken status
-		// 	for pod, status := range req.mariadb.Status.Replication.Roles {
-		// 		if pod == fmt.Sprintf("%s-%d", req.mariadb.Name, i) {
-		// 			continue
-		// 		}
-		// 		if status == mariadbv1alpha1.ReplicationRoleUnknown {
-		// 			return ctrl.Result{},
-		// 				fmt.Errorf("error removing Pod '%s': another Pod is currently being configured, it should works on the next attempts", pod)
-		// 		}
-		// 	}
-		// 	if len(req.mariadb.Status.Replication.Roles) != int(req.mariadb.Spec.Replicas) {
-		// 		return ctrl.Result{}, fmt.Errorf("error removing Pod '%s': another Pod is missing, it should works on the next attempts", pod)
-		// 	}
-
-		// 	// Delete PVC
-		// 	key := types.NamespacedName{
-		// 		Name:      fmt.Sprintf("storage-%s-%d", req.mariadb.Name, i),
-		// 		Namespace: req.mariadb.Namespace,
-		// 	}
-		// 	var existingPvc corev1.PersistentVolumeClaim
-		// 	if err := r.Get(ctx, key, &existingPvc); err != nil {
-		// 		return ctrl.Result{}, fmt.Errorf("error getting pvc from Pod '%s': %v", pod, err)
-		// 	}
-		// 	if err := r.Delete(ctx, &existingPvc); err != nil {
-		// 		return ctrl.Result{}, fmt.Errorf("error deleting pvc from Pod '%s': %v", pod, err)
-		// 	}
-
-		// 	// Delete POD
-		// 	key = types.NamespacedName{
-		// 		Name:      fmt.Sprintf("%s-%d", req.mariadb.Name, i),
-		// 		Namespace: req.mariadb.Namespace,
-		// 	}
-		// 	var existingPod corev1.Pod
-		// 	if err := r.Get(ctx, key, &existingPod); err != nil {
-		// 		return ctrl.Result{}, fmt.Errorf("error getting Pod '%s': %v", pod, err)
-		// 	}
-		// 	if err := r.Delete(ctx, &existingPod); err != nil {
-		// 		return ctrl.Result{}, fmt.Errorf("error deleting Pod '%s': %v", pod, err)
-		// 	}
-
-		// }
 	}
 	if !req.mariadb.HasConfiguredReplication() {
 		if err := r.patchStatus(ctx, req.mariadb, func(status *mariadbv1alpha1.MariaDBStatus) {

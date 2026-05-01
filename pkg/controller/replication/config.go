@@ -100,8 +100,8 @@ func (r *ReplicationConfigClient) ConfigureReplica(ctx context.Context, mariadb 
 		setOpt(&opts)
 	}
 
-	replication := mariadb.Replication()
-	isExternalReplication := replication.IsExternalReplication()
+	// replication := mariadb.Replication()
+	// isExternalReplication := replication.IsExternalReplication()
 
 	if err := client.ResetMaster(ctx); err != nil {
 		return fmt.Errorf("error resetting master: %v", err)
@@ -122,16 +122,14 @@ func (r *ReplicationConfigClient) ConfigureReplica(ctx context.Context, mariadb 
 		return fmt.Errorf("error enabling read_only: %v", err)
 	}
 
-	isReplicationConfigured, _ := client.IsReplicationConfigured(ctx)
+	// isReplicationConfigured, _ := client.IsReplicationConfigured(ctx)
 
-	// return fmt.Errorf("REPLICATION ALREADY configured :%v ", val)
+	// if isExternalReplication && !isReplicationConfigured {
 
-	if isExternalReplication && !isReplicationConfigured {
-
-		if ready, err := r.configureExternalReplica(ctx, mariadb, replicaPodIndex); !ready || err != nil {
-			return err
-		}
-	}
+	// 	if ready, err := r.configureExternalReplica(ctx, mariadb, replicaPodIndex); !ready || err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	if err := r.changeMaster(ctx, mariadb, client, primaryPodIndex, opts.ChangeMasterOpts...); err != nil {
 		return fmt.Errorf("error changing master: %v", err)
@@ -142,62 +140,16 @@ func (r *ReplicationConfigClient) ConfigureReplica(ctx context.Context, mariadb 
 	return nil
 }
 
-func (r *ReplicationConfigClient) configureExternalReplica(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
-	replicaPodIndex int) (bool, error) {
+// func (r *ReplicationConfigClient) configureExternalReplica(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
+// 	replicaPodIndex int) (bool, error) {
 
-	// replication := mariadb.Replication()
-	// emdb, err := r.refResolver.ExternalMariaDB(ctx, &replication.ReplicaFromExternal.MariaDBRef, mariadb.Namespace)
-	// if err != nil {
-	// 	return false, fmt.Errorf("error getting external MariaDB object: %v", err)
-	// }
-	// key := types.NamespacedName{
-	// 	Name:      emdb.Name,
-	// 	Namespace: emdb.Namespace,
-	// }
-	// // Check if a viable backup already exists
-	// var isBackupInvalid = false
-	// var binlogExpireLogsDuration time.Duration
-	// var existingBackup mariadbv1alpha1.Backup
-
-	// if binlogExpireLogsDuration, err = getBinlogExpireLogsDuration(emdb, ctx, r.refResolver); err != nil {
-	// 	return false, fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
-	// }
-	// err = r.Get(ctx, key, &existingBackup)
-	// if err == nil {
-	// 	isBackupInvalid = invalidateBackup(existingBackup, ctx, binlogExpireLogsDuration, *r)
-	// }
-	// // Create a new backup if required
-	// if err != nil || isBackupInvalid {
-	// 	return false, newBackup(emdb, *r, ctx, binlogExpireLogsDuration, mariadb.GetImagePullSecrets(), mariadb.Spec.Storage.Size)
-	// }
-
-	// if !existingBackup.IsComplete() {
-	// 	return false, nil
-	// }
-
-	// var existingRestore mariadbv1alpha1.Restore
-	// err := r.Get(ctx, mariadb.RestoreKeyInPod(replicaPodIndex), &existingRestore)
-
-	// if err == nil && !existingRestore.IsComplete() {
-	// 	return false, nil
-	// }
-
-	// if !existingRestore.IsComplete() {
-	// 	// Restore/Bootstrap node from backup
-	// 	return false, newRestore(mariadb, *r, ctx, replicaPodIndex)
-	// }
-
-	// if err := r.Delete(ctx, &existingRestore); err != nil {
-	// 	return false, fmt.Errorf("error deleting Restore: %v", err)
-	// }
-
-	return true, nil
-}
+// 	return true, nil
+// }
 
 func (r *ReplicationConfigClient) changeMaster(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB, client *sql.Client,
 	primaryPodIndex int, opts ...sql.ChangeMasterOpt) error {
 	replication := ptr.Deref(mariadb.Spec.Replication, mariadbv1alpha1.Replication{})
-	// replication := mariadb.Replication()
+
 	if replication.Replica.ReplPasswordSecretKeyRef == nil {
 		return errors.New("'spec.replication.replica.replPasswordSecretKeyRef` must not be nil'")
 	}
@@ -482,74 +434,3 @@ func formatAccountName(username, host string) string {
 func createTpl(name, t string) *template.Template {
 	return template.Must(template.New(name).Parse(t))
 }
-
-// func newRestore(mariadb *mariadbv1alpha1.MariaDB, r ReplicationConfigClient, ctx context.Context, replicaPodIndex int) error {
-// 	restoreOpts := builder.RestoreOpts{
-// 		PodIndex: &replicaPodIndex,
-// 	}
-// 	restore, err := r.builder.BuildRestore(mariadb, mariadb.RestoreKeyInPod(replicaPodIndex), restoreOpts)
-// 	if err != nil {
-// 		return fmt.Errorf("error building Restore object: %v", err)
-// 	}
-// 	if err := r.Create(ctx, restore); err != nil {
-// 		return fmt.Errorf("error creating Restore object: %v", err)
-// 	}
-// 	// return fmt.Errorf("CREATING Restore object: %v", restore.Name)
-// 	return nil
-// }
-
-// func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx context.Context,
-// 	refResolver *refresolver.RefResolver) (time.Duration, error) {
-// 	var external_client *sql.Client
-// 	var err error
-// 	if external_client, err = sql.NewClientWithMariaDB(ctx, emdb, refResolver); err != nil {
-// 		return time.Duration(0), fmt.Errorf("error getting external MariaDB client: %v", err)
-// 	}
-// 	defer external_client.Close()
-
-// 	var binlogExpireLogsSecondsStr string
-// 	var binlogExpireLogsSeconds int
-
-// 	if semver.Compare(emdb.Status.Version, "10.6.1") >= 0 {
-// 		binlogExpireLogsSecondsStr, err = external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
-// 		if err != nil {
-// 			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
-// 		}
-// 		binlogExpireLogsSeconds, _ = strconv.Atoi(binlogExpireLogsSecondsStr)
-// 	} else {
-// 		binlogExpireLogsDaysStr, err := external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
-// 		if err != nil {
-// 			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
-// 		}
-// 		binlogExpireLogsDays, _ := strconv.Atoi(binlogExpireLogsDaysStr)
-// 		binlogExpireLogsSeconds = binlogExpireLogsDays * 86400
-// 	}
-
-// 	return time.Duration(binlogExpireLogsSeconds) * time.Second, nil
-// }
-
-// func invalidateBackup(existingBackup mariadbv1alpha1.Backup, ctx context.Context,
-// 	binlogExpireLogsDuration time.Duration, r ReplicationReconciler) bool {
-// 	if time.Since(existingBackup.CreationTimestamp.Time) > binlogExpireLogsDuration {
-// 		if err := r.Delete(ctx, &existingBackup); err == nil {
-// 			return true
-// 		}
-// 	}
-// 	return false
-// }
-
-// func newReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB) mariadbv1alpha1.GeneratedSecretKeyRef {
-// 	if mariadb.Replication().Enabled && mariadb.Replication().Replica.ReplPasswordSecretKeyRef != nil {
-// 		return *mariadb.Replication().Replica.ReplPasswordSecretKeyRef
-// 	}
-
-// 	return mariadbv1alpha1.GeneratedSecretKeyRef{
-// 		SecretKeySelector: mariadbv1alpha1.SecretKeySelector{
-// 			LocalObjectReference: mariadbv1alpha1.LocalObjectReference{
-// 				Name: fmt.Sprintf("repl-password-%s", mariadb.Name),
-// 			},
-// 			Key: "password",
-// 		},
-// 		Generate: true,
-// 	}
-// }

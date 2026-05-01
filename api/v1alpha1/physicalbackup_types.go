@@ -262,10 +262,6 @@ type PhysicalBackupStatus struct {
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=status
 	NextScheduleTime *metav1.Time `json:"nextScheduleTime,omitempty"`
-	// ScheduleFailureCount is the schedule failure counter.
-	// +optional
-	// +operator-sdk:csv:customresourcedefinitions:type=status
-	ScheduleFailureCount *int `json:"scheduleFailureCount,omitempty"`
 }
 
 func (b *PhysicalBackupStatus) SetCondition(condition metav1.Condition) {

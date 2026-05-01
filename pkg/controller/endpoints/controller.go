@@ -91,21 +91,7 @@ func (r *EndpointsReconciler) endpointSlice(ctx context.Context, key types.Names
 	}
 
 	endpoints := []discoveryv1.Endpoint{}
-	// for _, pod := range pods {
-	// 	endpoint, err := buildEndpoint(&pod)
-	// 	if err != nil {
-	// 		logger.Info("error building Endpoint", "err", err)
-	// 		continue
-	// 	}
-	// 	//@TODO Revisit it
-	// 	if mdbpod.PodReady(&pod) && (mariadb.Status.Replication.Roles[pod.Name] == mariadbv1alpha1.ReplicationRoleReplica ||
-	// 		mariadb.Status.Replication.Roles[pod.Name] == mariadbv1alpha1.ReplicationRoleReplicaBroken) {
-	// 		endpoints = append(endpoints, *endpoint)
-	// 	} else {
-	// 		endpoint.Conditions.Ready = ptr.To(false)
-	// 		endpoints = append(endpoints, *endpoint)
-	// 	}
-	// }
+
 	for _, pod := range pods {
 		if mariadb.Status.Replication != nil && mariadb.Status.Replication.Roles[pod.Name] == mariadbv1alpha1.ReplicationRoleUnknown {
 			continue

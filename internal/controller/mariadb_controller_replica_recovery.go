@@ -140,19 +140,6 @@ func (r *MariaDBReconciler) reconcileReplicaRecovery(ctx context.Context, mariad
 	}
 
 	replication := mariadb.Replication()
-	// if len(replicasToRecover) == int(mariadb.Spec.Replicas) && replication.IsExternalReplication() {
-
-	// 	logger.Info("All replicas are broken, need a restore logical backup from external primary",
-	// 		"totalReplicasToRecover", len(replicasToRecover), "totalReplicas", int(mariadb.Spec.Replicas))
-
-	// 	if err := r.handleInitialBackup(ctx, mariadb, replication, logger); err != nil {
-	// 		return ctrl.Result{}, err
-	// 	}
-	// 	if _, err := r.reconcileLogicalBackupReplicaRecovery(ctx, replicasToRecover[0], mariadb, logger); err != nil {
-	// 		return ctrl.Result{}, err
-	// 	}
-	// 	return ctrl.Result{}, nil
-	// }
 
 	if err := r.patchStatus(ctx, mariadb, func(status *mariadbv1alpha1.MariaDBStatus) error {
 		condition.SetReplicaRecovering(status)
@@ -333,14 +320,6 @@ func (r *MariaDBReconciler) reconcileLogicalBackupReplicaRecovery(ctx context.Co
 	if _, err := r.reconcileRestoreInPod(ctx, mariadb, *podIndex, logger, true); err != nil {
 		return ctrl.Result{}, fmt.Errorf("error reconciling restore in Pod: %v", err)
 	}
-
-	// if err := r.ensureReplicationConfiguredInPod(ctx, replica, mariadb, nil, logger); err != nil {
-	// 	return ctrl.Result{}, fmt.Errorf("error ensuring replica %s configured: %v", replica, err)
-	// }
-
-	// if err := r.ensureReplicaRecovered(ctx, replica, mariadb, logger); err != nil {
-	// 	return ctrl.Result{}, fmt.Errorf("error ensuring replica %s recovered: %v", replica, err)
-	// }
 
 	logger.Info("cleanning up the restore pod")
 	_ = r.cleanupRestoreInPod(ctx, mariadb, *podIndex, logger)
@@ -602,9 +581,6 @@ func (r *MariaDBReconciler) setReplicaRecoveredAndCleanup(ctx context.Context, m
 		return fmt.Errorf("error patching MariaDB status: %v", err)
 	}
 
-	// if err := r.cleanupPhysicalBackup(ctx, mariadb.PhysicalBackupReplicaRecoveryKey()); err != nil {
-	// 	return err
-	// }
 	if err := r.cleanupInitJobs(ctx, mariadb); err != nil {
 		return err
 	}
