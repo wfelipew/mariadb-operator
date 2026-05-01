@@ -198,6 +198,11 @@ func (in *BackupSpec) DeepCopyInto(out *BackupSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.Tables != nil {
+		in, out := &in.Tables, &out.Tables
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.IgnoreGlobalPriv != nil {
 		in, out := &in.IgnoreGlobalPriv, &out.IgnoreGlobalPriv
 		*out = new(bool)
@@ -3810,6 +3815,11 @@ func (in *ReplicaFromExternal) DeepCopyInto(out *ReplicaFromExternal) {
 		in, out := &in.ServerIdOffset, &out.ServerIdOffset
 		*out = new(int)
 		**out = **in
+	}
+	if in.FilteredReplicaTables != nil {
+		in, out := &in.FilteredReplicaTables, &out.FilteredReplicaTables
+		*out = make([]string, len(*in))
+		copy(*out, *in)
 	}
 }
 

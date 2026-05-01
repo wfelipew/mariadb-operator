@@ -71,6 +71,7 @@ type PodEnvironment struct {
 	MariaDBReplEnabled                 string `env:"MARIADB_REPL_ENABLED"`
 	MariaDBExternalReplEnabled         string `env:"MARIADB_EXTERNAL_REPL_ENABLED"`
 	MariaDBExternalReplServerIdOffset  string `env:"MARIADB_EXTERNAL_REPL_SERVER_ID_OFFSET"`
+	MariaDBExternalReplFilteredTables  string `env:"MARIADB_EXTERNAL_REPL_FILTERED_TABLES"`
 	MariaDBReplGtidStrictMode          string `env:"MARIADB_REPL_GTID_STRICT_MODE"`
 	MariaDBReplSemiSyncEnabled         string `env:"MARIADB_REPL_SEMI_SYNC_ENABLED"`
 	MariaDBReplSemiSyncMasterTimeout   string `env:"MARIADB_REPL_SEMI_SYNC_MASTER_TIMEOUT"`
@@ -183,7 +184,15 @@ func (e *PodEnvironment) ExternalReplServerIdOffset() (*int, error) {
 	}
 	offset, err := strconv.Atoi(e.MariaDBExternalReplServerIdOffset)
 	return &offset, err
+}
 
+// ExternalReplFilteredTables returns the list of "database.table" entries to replicate,
+// or nil when filtered replication is not configured.
+func (e *PodEnvironment) ExternalReplFilteredTables() []string {
+	if e.MariaDBExternalReplFilteredTables == "" {
+		return nil
+	}
+	return strings.Split(e.MariaDBExternalReplFilteredTables, ",")
 }
 
 func GetPodEnv(ctx context.Context) (*PodEnvironment, error) {

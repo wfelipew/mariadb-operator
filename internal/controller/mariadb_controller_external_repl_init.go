@@ -207,7 +207,7 @@ func (r *MariaDBReconciler) handleInitialBackup(ctx context.Context, mariadb *ma
 		return fmt.Errorf("error getting external MariaDB object: %v", err)
 	}
 	key := types.NamespacedName{
-		Name:      emdb.Name,
+		Name:      mariadb.ExternalReplLogicalBackupName(),
 		Namespace: emdb.Namespace,
 	}
 
@@ -231,7 +231,8 @@ func (r *MariaDBReconciler) handleInitialBackup(ctx context.Context, mariadb *ma
 	// Create a new backup if required
 	if err != nil || isBackupInvalid {
 		logger.Info("Take a new backup")
-		return newBackup(emdb, *r, ctx, binlogExpireLogsDuration, mariadb.GetImagePullSecrets(), mariadb.Spec.Storage.Size)
+		return newBackup(emdb, *r, ctx, binlogExpireLogsDuration, mariadb.GetImagePullSecrets(), mariadb.Spec.Storage.Size,
+			key, replication.ReplicaFromExternal.FilteredReplicaTables)
 	}
 
 	if !existingBackup.IsComplete() {
@@ -266,12 +267,16 @@ func removeBackupIfExpired(existingBackup mariadbv1alpha1.Backup, ctx context.Co
 
 func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r MariaDBReconciler, ctx context.Context,
 	binlogExpireLogsDuration time.Duration, imagePullSecrets []mariadbv1alpha1.LocalObjectReference,
-	size *resource.Quantity) error {
+	size *resource.Quantity, key types.NamespacedName, filteredTables []string) error {
 
-	key := types.NamespacedName{
-		Name:      emdb.Name,
-		Namespace: emdb.Namespace,
+	args := []string{
+		"--master-data=1",
+		"--gtid",
+		"--verbose",
+		"--single-transaction",
+		"--ignore-table=mysql.global_priv",
 	}
+
 	backupOps := builder.BackupOpts{
 		Metadata: []*mariadbv1alpha1.Metadata{emdb.Spec.InheritMetadata},
 		Key:      key,
@@ -281,14 +286,8 @@ func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r MariaDBReconciler, ctx c
 			},
 			Kind: mariadbv1alpha1.ExternalMariaDBKind,
 		},
-		Args: []string{
-			"--master-data=1",
-			"--gtid",
-			"--verbose",
-			"--all-databases",
-			"--single-transaction",
-			"--ignore-table=mysql.global_priv",
-		},
+		Args:        args,
+		Tables:      filteredTables,
 		Compression: mariadbv1alpha1.CompressGzip,
 		Storage: mariadbv1alpha1.BackupStorage{
 			PersistentVolumeClaim: &mariadbv1alpha1.PersistentVolumeClaimSpec{

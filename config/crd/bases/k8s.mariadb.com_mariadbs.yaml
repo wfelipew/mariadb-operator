@@ -4801,6 +4801,15 @@ spec:
                         description: ConnectionTimeout to be used when the replica
                           connects to the primary.
                         type: string
+                      filteredReplicaTables:
+                        description: |-
+                          FilteredReplicaTables is an optional list of tables in "database.table" format to replicate.
+                          When set, the logical backup will only include these tables and the replication will be
+                          configured with replicate_do_table for each entry. GTID strict mode is automatically
+                          disabled when this field is set, as partial replication is incompatible with it.
+                        items:
+                          type: string
+                        type: array
                       gtid:
                         description: |-
                           Gtid indicates which Global Transaction ID should be used when connecting a replica to the master.

@@ -69,6 +69,21 @@ var (
 		Namespace: testNamespace,
 	}
 
+	testMdbERFilteredKey = types.NamespacedName{
+		Name:      "mariadb-repl-ext-filtered",
+		Namespace: testNamespace,
+	}
+
+	testMdbPbRecoveryERFilteredKey = types.NamespacedName{
+		Name:      testMdbERFilteredKey.Name + "-pb-recovery",
+		Namespace: testNamespace,
+	}
+
+	testPbTemplateERFilteredKey = types.NamespacedName{
+		Name:      testMdbERFilteredKey.Name + "-backup-template",
+		Namespace: testNamespace,
+	}
+
 	testPwdKey = types.NamespacedName{
 		Name:      "password",
 		Namespace: testNamespace,

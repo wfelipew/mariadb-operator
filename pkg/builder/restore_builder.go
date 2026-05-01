@@ -2,6 +2,7 @@ package builder
 
 import (
 	"fmt"
+	"strings"
 
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/v25/api/v1alpha1"
 	metadata "github.com/mariadb-operator/mariadb-operator/v25/pkg/builder/metadata"
@@ -58,7 +59,7 @@ func (b *Builder) BuildRestore(mariadb *mariadbv1alpha1.MariaDB, key types.Names
 	} else {
 		restoreSource = &mariadbv1alpha1.RestoreSource{
 			BackupRef: &mariadbv1alpha1.LocalObjectReference{
-				Name: mariadb.Replication().ReplicaFromExternal.MariaDBRef.Name,
+				Name: mariadb.ExternalReplLogicalBackupName(),
 			},
 		}
 	}
@@ -76,6 +77,13 @@ func (b *Builder) BuildRestore(mariadb *mariadbv1alpha1.MariaDB, key types.Names
 				WaitForIt: true,
 			},
 		},
+	}
+
+	ext := mariadb.Replication().ReplicaFromExternal
+	if ext != nil && len(ext.FilteredReplicaTables) > 0 {
+		if db, _, found := strings.Cut(ext.FilteredReplicaTables[0], "."); found {
+			restore.Spec.Database = db
+		}
 	}
 	if restoreJob.Metadata != nil {
 		restore.Spec.InheritMetadata = restoreJob.Metadata

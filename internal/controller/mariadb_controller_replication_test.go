@@ -1,11 +1,15 @@
 package controller
 
 import (
+	"fmt"
+	"strconv"
 	"time"
 
 	volumesnapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/v25/api/v1alpha1"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/metadata"
+	"github.com/mariadb-operator/mariadb-operator/v25/pkg/refresolver"
+	sqlClient "github.com/mariadb-operator/mariadb-operator/v25/pkg/sql"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/statefulset"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -516,6 +520,349 @@ var _ = Describe("MariaDB replication scale out", Ordered, func() {
 			},
 		),
 	)
+})
+
+var _ = Describe("MariaDB replication from external server with filtered tables", Ordered, func() {
+	const (
+		filteredDB      = "filtereddb"
+		replicatedTable = "replicated_table"
+		excludedTable   = "excluded_table"
+		otherDB         = "otherdb"
+		otherTable      = "other_table"
+	)
+
+	var (
+		key = testMdbERFilteredKey
+		mdb = &mariadbv1alpha1.MariaDB{}
+	)
+
+	BeforeAll(func() {
+		By("Getting the external MariaDB client")
+		var emdb mariadbv1alpha1.ExternalMariaDB
+		Expect(k8sClient.Get(testCtx, testEMdbkey, &emdb)).To(Succeed())
+		refResolver := refresolver.New(k8sClient)
+		externalClient, err := sqlClient.NewClientWithMariaDB(testCtx, &emdb, refResolver)
+		Expect(err).To(Succeed())
+		defer externalClient.Close()
+
+		By("Creating tables on the external server")
+		Expect(externalClient.Exec(testCtx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", filteredDB))).To(Succeed())
+		Expect(externalClient.Exec(testCtx, fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.`%s` (id INT PRIMARY KEY)",
+			filteredDB, replicatedTable))).To(Succeed())
+		Expect(externalClient.Exec(testCtx, fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.`%s` (id INT PRIMARY KEY)",
+			filteredDB, excludedTable))).To(Succeed())
+		Expect(externalClient.Exec(testCtx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", otherDB))).To(Succeed())
+		Expect(externalClient.Exec(testCtx, fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.`%s` (id INT PRIMARY KEY)",
+			otherDB, otherTable))).To(Succeed())
+
+		By("Creating PhysicalBackup template for filtered external replication recovery")
+		backupTemplate := mariadbv1alpha1.PhysicalBackup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      testPbTemplateERFilteredKey.Name,
+				Namespace: testPbTemplateERFilteredKey.Namespace,
+			},
+			Spec: mariadbv1alpha1.PhysicalBackupSpec{
+				MariaDBRef: mariadbv1alpha1.MariaDBRef{
+					ObjectReference: mariadbv1alpha1.ObjectReference{
+						Name: testMdbERFilteredKey.Name,
+					},
+					Kind:      mariadbv1alpha1.ExternalMariaDBKind,
+					WaitForIt: false,
+				},
+				Target: ptr.To(mariadbv1alpha1.PhysicalBackupTargetPreferReplica),
+				Schedule: &mariadbv1alpha1.PhysicalBackupSchedule{
+					Suspend: true,
+				},
+				Compression: mariadbv1alpha1.CompressBzip2,
+				Storage: mariadbv1alpha1.PhysicalBackupStorage{
+					PersistentVolumeClaim: &mariadbv1alpha1.PersistentVolumeClaimSpec{
+						Resources: corev1.VolumeResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceStorage: resource.MustParse("1Gi"),
+							},
+						},
+						AccessModes: []corev1.PersistentVolumeAccessMode{
+							corev1.ReadWriteOnce,
+						},
+					},
+				},
+				Timeout:     &metav1.Duration{Duration: 1 * time.Hour},
+				PodAffinity: ptr.To(true),
+				JobContainerTemplate: mariadbv1alpha1.JobContainerTemplate{
+					Resources: &mariadbv1alpha1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("100m"),
+							corev1.ResourceMemory: resource.MustParse("128Mi"),
+						},
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("300m"),
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(testCtx, &backupTemplate)).To(Succeed())
+
+		mdbFiltered := &mariadbv1alpha1.MariaDB{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      key.Name,
+				Namespace: key.Namespace,
+			},
+			Spec: mariadbv1alpha1.MariaDBSpec{
+				Username: &testUser,
+				PasswordSecretKeyRef: &mariadbv1alpha1.GeneratedSecretKeyRef{
+					SecretKeySelector: mariadbv1alpha1.SecretKeySelector{
+						LocalObjectReference: mariadbv1alpha1.LocalObjectReference{
+							Name: testPwdKey.Name,
+						},
+						Key: testPwdSecretKey,
+					},
+				},
+				Database: &testDatabase,
+				MyCnf: ptr.To(`[mariadb]
+				bind-address=*
+				default_storage_engine=InnoDB
+				binlog_format=row
+				innodb_autoinc_lock_mode=2
+				max_allowed_packet=256M`),
+				Replication: &mariadbv1alpha1.Replication{
+					ReplicationSpec: mariadbv1alpha1.ReplicationSpec{
+						ReplicaFromExternal: &mariadbv1alpha1.ReplicaFromExternal{
+							MariaDBRef: mariadbv1alpha1.MariaDBRef{
+								ObjectReference: mariadbv1alpha1.ObjectReference{
+									Name: testEMdbkey.Name,
+								},
+								Kind: mariadbv1alpha1.ExternalMariaDBKind,
+							},
+							ServerIdOffset: ptr.To(70),
+							FilteredReplicaTables: []string{
+								fmt.Sprintf("%s.%s", filteredDB, replicatedTable),
+							},
+						},
+						Replica: mariadbv1alpha1.ReplicaReplication{
+							ReplicaBootstrapFrom: &mariadbv1alpha1.ReplicaBootstrapFrom{
+								PhysicalBackupTemplateRef: mariadbv1alpha1.LocalObjectReference{
+									Name: testPbTemplateERFilteredKey.Name,
+								},
+							},
+							IgnoreMaxLagSeconds:             ptr.To(true),
+							IgnoreReplicationLivenessProbes: ptr.To(true),
+						},
+					},
+					Enabled: true,
+				},
+				Replicas: 2,
+				Storage: mariadbv1alpha1.Storage{
+					Size:                ptr.To(resource.MustParse("300Mi")),
+					StorageClassName:    "standard-resize",
+					ResizeInUseVolumes:  ptr.To(true),
+					WaitForVolumeResize: ptr.To(true),
+				},
+				TLS: &mariadbv1alpha1.TLS{
+					Enabled:  true,
+					Required: ptr.To(true),
+				},
+				Service: &mariadbv1alpha1.ServiceTemplate{
+					Type: corev1.ServiceTypeLoadBalancer,
+					Metadata: &mariadbv1alpha1.Metadata{
+						Annotations: map[string]string{
+							"metallb.universe.tf/loadBalancerIPs": testCidrPrefix + ".0.188",
+						},
+					},
+				},
+				Connection: &mariadbv1alpha1.ConnectionTemplate{
+					SecretName: func() *string {
+						s := "mdb-repl-ext-filtered-conn"
+						return &s
+					}(),
+					SecretTemplate: &mariadbv1alpha1.SecretTemplate{
+						Key: &testConnSecretKey,
+					},
+				},
+				PrimaryService: &mariadbv1alpha1.ServiceTemplate{
+					Type: corev1.ServiceTypeLoadBalancer,
+					Metadata: &mariadbv1alpha1.Metadata{
+						Annotations: map[string]string{
+							"metallb.universe.tf/loadBalancerIPs": testCidrPrefix + ".0.189",
+						},
+					},
+				},
+				PrimaryConnection: &mariadbv1alpha1.ConnectionTemplate{
+					SecretName: func() *string {
+						s := "mdb-repl-ext-filtered-conn-primary"
+						return &s
+					}(),
+					SecretTemplate: &mariadbv1alpha1.SecretTemplate{
+						Key: &testConnSecretKey,
+					},
+				},
+				SecondaryService: &mariadbv1alpha1.ServiceTemplate{
+					Type: corev1.ServiceTypeLoadBalancer,
+					Metadata: &mariadbv1alpha1.Metadata{
+						Annotations: map[string]string{
+							"metallb.universe.tf/loadBalancerIPs": testCidrPrefix + ".0.194",
+						},
+					},
+				},
+				SecondaryConnection: &mariadbv1alpha1.ConnectionTemplate{
+					SecretName: func() *string {
+						s := "mdb-repl-ext-filtered-conn-secondary"
+						return &s
+					}(),
+					SecretTemplate: &mariadbv1alpha1.SecretTemplate{
+						Key: &testConnSecretKey,
+					},
+				},
+				UpdateStrategy: mariadbv1alpha1.UpdateStrategy{
+					Type: mariadbv1alpha1.ReplicasFirstPrimaryLastUpdateType,
+				},
+			},
+		}
+		applyMariadbTestConfig(mdbFiltered)
+		By("Creating MariaDB with filtered external replication")
+		Expect(k8sClient.Create(testCtx, mdbFiltered)).To(Succeed())
+
+		DeferCleanup(func() {
+			var pbTemplate mariadbv1alpha1.PhysicalBackup
+			if err := k8sClient.Get(testCtx, testPbTemplateERFilteredKey, &pbTemplate); err == nil {
+				Expect(k8sClient.Delete(testCtx, &pbTemplate)).To(Succeed())
+			}
+			var pbRecoveryPvc corev1.PersistentVolumeClaim
+			if err := k8sClient.Get(testCtx, testMdbPbRecoveryERFilteredKey, &pbRecoveryPvc); err == nil {
+				Expect(k8sClient.Delete(testCtx, &pbRecoveryPvc)).To(Succeed())
+			}
+			deleteMariadb(key, false)
+		})
+	})
+
+	It("should reconcile", func() {
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testVeryHighTimeout, testInterval).Should(BeTrue())
+	})
+
+	It("should only have the filtered table after initial restore", func() {
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testVeryHighTimeout, testInterval).Should(BeTrue())
+
+		refResolver := refresolver.New(k8sClient)
+		for i := 0; i < int(mdb.Spec.Replicas); i++ {
+			podClient, err := sqlClient.NewInternalClientWithPodIndex(testCtx, mdb, refResolver, i)
+			By("Expecting to get SQL client for Pod " + strconv.Itoa(i))
+			if err != nil {
+				fmt.Fprintf(GinkgoWriter, "Not able get SQL for POD: %v \n", err)
+			}
+			Expect(err).To(Succeed())
+			defer podClient.Close()
+
+			By(fmt.Sprintf("Expecting Pod %d to have the replicated table", i))
+			exists, err := podClient.Exists(testCtx, fmt.Sprintf(
+				"SELECT 1 FROM information_schema.tables WHERE table_schema='%s' AND table_name='%s'",
+				filteredDB, replicatedTable,
+			))
+			resultdbg, _ := podClient.QueryColumnMaps(testCtx, fmt.Sprintf(
+				"SELECT table_schema,table_name FROM information_schema.tables ",
+			))
+			fmt.Fprintf(GinkgoWriter, "Expected %v.%v \n", filteredDB, replicatedTable)
+			fmt.Fprintf(GinkgoWriter, "Result %v  \n", resultdbg)
+			Expect(err).To(Succeed())
+			Expect(exists).To(BeTrue())
+
+			By(fmt.Sprintf("Expecting Pod %d to NOT have the excluded table from the same database", i))
+			exists, err = podClient.Exists(testCtx, fmt.Sprintf(
+				"SELECT 1 FROM information_schema.tables WHERE table_schema='%s' AND table_name='%s'",
+				filteredDB, excludedTable,
+			))
+			resultdbg2, _ := podClient.QueryColumnMap(testCtx, fmt.Sprintf(
+				"SELECT * FROM information_schema.tables WHERE table_schema='%s' AND table_name='%s'",
+				filteredDB, excludedTable,
+			))
+			fmt.Fprintf(GinkgoWriter, "Not expected %v.%v \n", filteredDB, excludedTable)
+			fmt.Fprintf(GinkgoWriter, "Result %v  \n", resultdbg2["table_name"])
+			Expect(err).To(Succeed())
+			Expect(exists).To(BeFalse())
+
+			By(fmt.Sprintf("Expecting Pod %d to NOT have the other database table", i))
+			exists, err = podClient.Exists(testCtx, fmt.Sprintf(
+				"SELECT 1 FROM information_schema.tables WHERE table_schema='%s' AND table_name='%s'",
+				otherDB, otherTable,
+			))
+			Expect(err).To(Succeed())
+			Expect(exists).To(BeFalse())
+		}
+	})
+
+	It("should replicate only changes to the filtered table", func() {
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testVeryHighTimeout, testInterval).Should(BeTrue())
+
+		By("Getting the external MariaDB client")
+		var emdb mariadbv1alpha1.ExternalMariaDB
+		Expect(k8sClient.Get(testCtx, testEMdbkey, &emdb)).To(Succeed())
+		refResolver := refresolver.New(k8sClient)
+		externalClient, err := sqlClient.NewClientWithMariaDB(testCtx, &emdb, refResolver)
+		Expect(err).To(Succeed())
+		defer externalClient.Close()
+
+		By("Inserting a row into the replicated table on the external server")
+		Expect(externalClient.Exec(testCtx, fmt.Sprintf(
+			"INSERT IGNORE INTO `%s`.`%s` VALUES (42)", filteredDB, replicatedTable,
+		))).To(Succeed())
+
+		By("Expecting the inserted row to appear on all replicas")
+		refResolver2 := refresolver.New(k8sClient)
+		for i := 0; i < int(mdb.Spec.Replicas); i++ {
+			podClient, pErr := sqlClient.NewInternalClientWithPodIndex(testCtx, mdb, refResolver2, i)
+			Expect(pErr).To(Succeed())
+			defer podClient.Close()
+
+			Eventually(func() bool {
+				exists, eErr := podClient.Exists(testCtx, fmt.Sprintf(
+					"SELECT 1 FROM `%s`.`%s` WHERE id = 42", filteredDB, replicatedTable,
+				))
+				return eErr == nil && exists
+			}, testTimeout, testInterval).Should(BeTrue(),
+				fmt.Sprintf("Pod %d should have the replicated row", i))
+		}
+	})
+
+	It("should have GTID strict mode disabled", func() {
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady()
+		}, testVeryHighTimeout, testInterval).Should(BeTrue())
+
+		refResolver := refresolver.New(k8sClient)
+		for i := 0; i < int(mdb.Spec.Replicas); i++ {
+			podClient, err := sqlClient.NewInternalClientWithPodIndex(testCtx, mdb, refResolver, i)
+			Expect(err).To(Succeed())
+			defer podClient.Close()
+
+			By(fmt.Sprintf("Expecting GTID strict mode to be disabled on Pod %d", i))
+			val, err := podClient.SystemVariable(testCtx, "gtid_strict_mode")
+			Expect(err).To(Succeed())
+			fmt.Fprintf(GinkgoWriter, "gtid_strict_mode: %v \n", val)
+			Expect(val).To(Equal("0"))
+		}
+	})
 })
 
 func buildTestMariaDBRepl(key types.NamespacedName) *mariadbv1alpha1.MariaDB {

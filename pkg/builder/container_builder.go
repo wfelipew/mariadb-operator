@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/v25/api/v1alpha1"
 	agentresources "github.com/mariadb-operator/mariadb-operator/v25/pkg/agent/resources"
@@ -490,15 +491,7 @@ func mariadbEnv(mariadb *mariadbv1alpha1.MariaDB) ([]corev1.EnvVar, error) {
 	if mariadb.IsReplicationEnabled() {
 
 		if mariadb.Replication().ReplicaFromExternal != nil {
-			env = append(env, corev1.EnvVar{
-				Name:  "MARIADB_EXTERNAL_REPL_ENABLED",
-				Value: fmt.Sprint(true),
-			})
-
-			env = append(env, corev1.EnvVar{
-				Name:  "MARIADB_EXTERNAL_REPL_SERVER_ID_OFFSET",
-				Value: fmt.Sprint(*mariadb.Replication().ReplicaFromExternal.ServerIdOffset),
-			})
+			env = append(env, externalReplEnvVars(mariadb.Replication().ReplicaFromExternal)...)
 		}
 
 		env = append(env, corev1.EnvVar{
@@ -580,6 +573,20 @@ func mariadbEnv(mariadb *mariadbv1alpha1.MariaDB) ([]corev1.EnvVar, error) {
 	}
 
 	return env, nil
+}
+
+func externalReplEnvVars(ext *mariadbv1alpha1.ReplicaFromExternal) []corev1.EnvVar {
+	env := []corev1.EnvVar{
+		{Name: "MARIADB_EXTERNAL_REPL_ENABLED", Value: fmt.Sprint(true)},
+		{Name: "MARIADB_EXTERNAL_REPL_SERVER_ID_OFFSET", Value: fmt.Sprint(*ext.ServerIdOffset)},
+	}
+	if ext.HasFilteredTables() {
+		env = append(env, corev1.EnvVar{
+			Name:  "MARIADB_EXTERNAL_REPL_FILTERED_TABLES",
+			Value: strings.Join(ext.FilteredReplicaTables, ","),
+		})
+	}
+	return env
 }
 
 func s3Env(s3 *mariadbv1alpha1.S3) []corev1.EnvVar {

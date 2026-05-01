@@ -300,8 +300,9 @@ spec:
                 - gzip
                 type: string
               databases:
-                description: Databases defines the logical databases to be backed
-                  up. If not provided, all databases are backed up.
+                description: |-
+                  Databases defines the logical databases to be backed up. If not provided, all databases are backed up.
+                  Mutually exclusive with Tables.
                 items:
                   type: string
                 type: array
@@ -1031,6 +1032,13 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              tables:
+                description: |-
+                  Tables defines specific tables to be backed up, in "database.table" format. All entries must
+                  share the same database. Mutually exclusive with Databases.
+                items:
+                  type: string
+                type: array
               timeZone:
                 description: TimeZone defines the timezone associated with the cron
                   expression.
@@ -6959,6 +6967,15 @@ spec:
                         description: ConnectionTimeout to be used when the replica
                           connects to the primary.
                         type: string
+                      filteredReplicaTables:
+                        description: |-
+                          FilteredReplicaTables is an optional list of tables in "database.table" format to replicate.
+                          When set, the logical backup will only include these tables and the replication will be
+                          configured with replicate_do_table for each entry. GTID strict mode is automatically
+                          disabled when this field is set, as partial replication is incompatible with it.
+                        items:
+                          type: string
+                        type: array
                       gtid:
                         description: |-
                           Gtid indicates which Global Transaction ID should be used when connecting a replica to the master.

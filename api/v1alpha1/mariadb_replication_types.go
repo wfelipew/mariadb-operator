@@ -8,6 +8,7 @@ import (
 
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/docker"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/environment"
+	"github.com/mariadb-operator/mariadb-operator/v25/pkg/hash"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -238,6 +239,18 @@ type ReplicaFromExternal struct {
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	ServerIdOffset *int `json:"serverIdOffset,omitempty"`
+	// FilteredReplicaTables is an optional list of tables in "database.table" format to replicate.
+	// When set, the logical backup will only include these tables and the replication will be
+	// configured with replicate_do_table for each entry. GTID strict mode is automatically
+	// disabled when this field is set, as partial replication is incompatible with it.
+	// +optional
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	FilteredReplicaTables []string `json:"filteredReplicaTables,omitempty"`
+}
+
+// HasFilteredTables returns true when at least one filtered table is defined.
+func (r *ReplicaFromExternal) HasFilteredTables() bool {
+	return len(r.FilteredReplicaTables) > 0
 }
 
 // SetDefaults fills the current ReplicaReplication object with DefaultReplicationSpec.
@@ -435,7 +448,12 @@ func (r *Replication) SetDefaults(mdb *MariaDB, env *environment.OperatorEnv) er
 	}
 
 	if r.GtidStrictMode == nil {
-		r.GtidStrictMode = ptr.To(true)
+		// Filtered replica is incompatible with GTID strict mode; disable it automatically.
+		if r.IsExternalReplication() && r.ReplicaFromExternal.HasFilteredTables() {
+			r.GtidStrictMode = ptr.To(false)
+		} else {
+			r.GtidStrictMode = ptr.To(true)
+		}
 	}
 	if r.SemiSyncEnabled == nil {
 		r.SemiSyncEnabled = ptr.To(true)
@@ -521,6 +539,22 @@ func (m *MariaDB) IsRecoveringReplicas() bool {
 // IsGaleraInitialized indicates that the Galera init Job has successfully completed.
 func (m *MariaDB) IsExternalReplInitialized() bool {
 	return meta.IsStatusConditionTrue(m.Status.Conditions, ConditionTypeExternalReplInitialized)
+}
+
+// ExternalReplLogicalBackupName returns the name of the logical Backup object used during external replication init.
+func (m *MariaDB) ExternalReplLogicalBackupName() string {
+	ext := m.Replication().ReplicaFromExternal
+	emdbName := ext.MariaDBRef.Name
+	if !ext.HasFilteredTables() {
+		return emdbName
+	}
+
+	suffix := hash.Hash(m.Name)[:8]
+	prefix := emdbName + "-"
+	if len(prefix)+len(suffix) > 253 {
+		prefix = prefix[:253-len(suffix)]
+	}
+	return prefix + suffix
 }
 
 // ReplicaRecoveryError indicates that the MariaDB instance has a replica recovery error.

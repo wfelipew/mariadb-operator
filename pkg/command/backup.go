@@ -341,13 +341,20 @@ func (b *BackupCommand) MariadbRestore(restore *mariadbv1alpha1.Restore,
 			"echo 💾 Restoring backup: %s",
 			b.getTargetFilePath(),
 		),
-		fmt.Sprintf(
-			"mariadb %s %s < %s",
-			connFlags,
-			args,
-			b.getTargetFilePath(),
-		),
 	}
+	if restore.Spec.Database != "" {
+		cmds = append(cmds, fmt.Sprintf(
+			"mariadb %s -e 'CREATE DATABASE IF NOT EXISTS `%s`;'",
+			connFlags,
+			restore.Spec.Database,
+		))
+	}
+	cmds = append(cmds, fmt.Sprintf(
+		"mariadb %s %s < %s",
+		connFlags,
+		args,
+		b.getTargetFilePath(),
+	))
 	return NewBashCommand(cmds), nil
 }
 
@@ -526,6 +533,11 @@ func (b *BackupCommand) mariadbDumpArgs(backup *mariadbv1alpha1.Backup, mariadb 
 		if hasDatabases {
 			dumpOpts = ds.Remove(dumpOpts, hasDatabasesOpt)
 		}
+	} else if len(backup.Spec.Tables) > 0 {
+		// --databases db --tables tbl1 tbl2 includes CREATE DATABASE / USE statements
+		// (the plain positional form does not), which are required for a clean restore.
+		db, _ := tableSelectionArgs(backup.Spec.Tables)
+		args = append(args, "--databases", db)
 	} else if !hasDatabases {
 		args = append(args, "--all-databases")
 	}
@@ -547,7 +559,35 @@ func (b *BackupCommand) mariadbDumpArgs(backup *mariadbv1alpha1.Backup, mariadb 
 		args = append(args, b.tlsArgs(mariadb)...)
 	}
 
-	return ds.UniqueArgs(ds.Merge(args, dumpOpts)...)
+	result := ds.UniqueArgs(ds.Merge(args, dumpOpts)...)
+
+	// --tables must come after all other flags; it overrides --databases to limit
+	// which tables are dumped while still emitting the database context statements.
+	if len(backup.Spec.Tables) > 0 {
+		_, tables := tableSelectionArgs(backup.Spec.Tables)
+		result = append(result, "--tables")
+		result = append(result, tables...)
+	}
+
+	return result
+}
+
+// tableSelectionArgs parses "db.table" entries into a database name and table list.
+// All entries are expected to share the same database.
+func tableSelectionArgs(tables []string) (string, []string) {
+	var db string
+	var tableNames []string
+	for _, t := range tables {
+		d, tbl, found := strings.Cut(t, ".")
+		if !found {
+			continue
+		}
+		if db == "" {
+			db = d
+		}
+		tableNames = append(tableNames, tbl)
+	}
+	return db, tableNames
 }
 
 func (b *BackupCommand) mariadbBackupArgs(mariadb *mariadbv1alpha1.MariaDB, targetPodIndex int) []string {
@@ -575,12 +615,21 @@ func (b *BackupCommand) mariadbBackupArgs(mariadb *mariadbv1alpha1.MariaDB, targ
 	return ds.UniqueArgs(ds.Merge(args, backupOpts)...)
 }
 
-func (b *BackupCommand) mariadbArgs(restore *mariadbv1alpha1.Restore, mariadb interfaces.TLSProvider) []string {
+func (b *BackupCommand) mariadbArgs(restore *mariadbv1alpha1.Restore, mariadb interfaces.MariaDBObject) []string {
 	args := make([]string, len(b.ExtraOpts))
 	copy(args, b.ExtraOpts)
 
 	if restore.Spec.Database != "" {
-		args = append(args, fmt.Sprintf("--one-database %s", restore.Spec.Database))
+		repl := mariadb.Replication()
+		isFilteredReplication := repl.ReplicaFromExternal != nil &&
+			len(repl.ReplicaFromExternal.FilteredReplicaTables) > 0
+		if isFilteredReplication {
+			// Filtered-table dumps have no USE statements; --database sets the connection
+			// default database upfront so every statement runs in the right context.
+			args = append(args, fmt.Sprintf("--database %s", restore.Spec.Database))
+		} else {
+			args = append(args, fmt.Sprintf("--one-database %s", restore.Spec.Database))
+		}
 	}
 
 	if mariadb.IsTLSEnabled() {

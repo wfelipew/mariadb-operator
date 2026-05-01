@@ -18,6 +18,7 @@ type BackupOpts struct {
 	Compression mariadbv1alpha1.CompressAlgorithm
 	Storage     mariadbv1alpha1.BackupStorage
 	Args        []string
+	Tables      []string
 	Resources   mariadbv1alpha1.ResourceRequirements
 	Affinity    mariadbv1alpha1.AffinityConfig
 	// MaxRetention metav1.Duration
@@ -39,6 +40,7 @@ func (b *Builder) BuildBackup(opts BackupOpts, owner metav1.Object) (*mariadbv1a
 			Storage:     opts.Storage,
 			MariaDBRef:  opts.MariaDBRef,
 			Compression: opts.Compression,
+			Tables:      opts.Tables,
 
 			MaxRetention: metav1.Duration{
 				Duration: opts.MaxRetention,

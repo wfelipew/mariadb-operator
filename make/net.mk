@@ -43,6 +43,16 @@ host-mariadb-repl: ## Add mariadb repl hosts to /etc/hosts.
 	@./hack/add_host.sh 130 mariadb-repl-primary.default.svc.cluster.local
 	@./hack/add_host.sh 131 mariadb-repl-secondary.default.svc.cluster.local
 
+.PHONY: host-mariadb-repl-ext-filtered
+host-mariadb-repl-ext-filtered: ## Add mariadb-repl-ext-filtered hosts to /etc/hosts.
+	@./hack/add_host.sh 184 mariadb-repl-ext-filtered-0.mariadb-repl-ext-filtered-internal.default.svc.cluster.local
+	@./hack/add_host.sh 185 mariadb-repl-ext-filtered-1.mariadb-repl-ext-filtered-internal.default.svc.cluster.local
+	@./hack/add_host.sh 186 mariadb-repl-ext-filtered-2.mariadb-repl-ext-filtered-internal.default.svc.cluster.local
+	@./hack/add_host.sh 187 mariadb-repl-ext-filtered-3.mariadb-repl-ext-filtered-internal.default.svc.cluster.local
+	@./hack/add_host.sh 188 mariadb-repl-ext-filtered.default.svc.cluster.local
+	@./hack/add_host.sh 189 mariadb-repl-ext-filtered-primary.default.svc.cluster.local
+	@./hack/add_host.sh 194 mariadb-repl-ext-filtered-secondary.default.svc.cluster.local
+
 .PHONY: host-mariadb-galera
 host-mariadb-galera: ## Add mariadb galera hosts to /etc/hosts.
 	@./hack/add_host.sh 140 mariadb-galera-0.mariadb-galera-internal.default.svc.cluster.local
@@ -104,7 +114,7 @@ host-maxscale-gui: ## Add maxscale GUI hosts to /etc/hosts.
 	@./hack/add_host.sh 231 maxscale-galera-gui.default.svc.cluster.local
 
 .PHONY: host
-host: host-mariadb host-mdb-test host-mdb-emulated-external-test host-mxs-test host-mariadb-repl host-mariadb-galera host-mariadb-galera-test host-monitoring host-minio host-maxscale-repl host-maxscale-galera host-maxscale-gui ## Configure hosts for local development.
+host: host-mariadb host-mdb-test host-mdb-emulated-external-test host-mxs-test host-mariadb-repl host-mariadb-repl-ext-filtered host-mariadb-galera host-mariadb-galera-test host-monitoring host-minio host-maxscale-repl host-maxscale-galera host-maxscale-gui ## Configure hosts for local development.
 
 .PHONY: net
 net: install-metallb host ## Configure networking for local development.
