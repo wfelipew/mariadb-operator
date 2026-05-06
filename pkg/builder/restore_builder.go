@@ -81,8 +81,18 @@ func (b *Builder) BuildRestore(mariadb *mariadbv1alpha1.MariaDB, key types.Names
 
 	ext := mariadb.Replication().ReplicaFromExternal
 	if ext != nil && len(ext.FilteredReplicaTables) > 0 {
-		if db, _, found := strings.Cut(ext.FilteredReplicaTables[0], "."); found {
-			restore.Spec.Database = db
+		// Only set a default database when all filtered tables share a single schema.
+		// Multi-schema dumps include per-schema USE statements, so no default is needed.
+		schemas := make(map[string]struct{})
+		for _, t := range ext.FilteredReplicaTables {
+			if s, _, found := strings.Cut(t, "."); found {
+				schemas[s] = struct{}{}
+			}
+		}
+		if len(schemas) == 1 {
+			if db, _, found := strings.Cut(ext.FilteredReplicaTables[0], "."); found {
+				restore.Spec.Database = db
+			}
 		}
 	}
 	if restoreJob.Metadata != nil {

@@ -55,8 +55,9 @@ type BackupSpec struct {
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	Databases []string `json:"databases,omitempty"`
-	// Tables defines specific tables to be backed up, in "database.table" format. All entries must
-	// share the same database. Mutually exclusive with Databases.
+	// Tables defines specific tables to be backed up, in "database.table" format. Entries may span
+	// multiple databases; when they do, --ignore-table flags are built at runtime by querying
+	// information_schema so that the dump remains a single consistent transaction. Mutually exclusive with Databases.
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	Tables []string `json:"tables,omitempty"`

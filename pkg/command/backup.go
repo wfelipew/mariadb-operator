@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -177,6 +178,8 @@ func (b *BackupCommand) MariadbDump(backup *mariadbv1alpha1.Backup,
 	}
 
 	args := strings.Join(b.mariadbDumpArgs(backup, mariadb), " ")
+	tablesBySchema := groupTablesBySchema(backup.Spec.Tables)
+	isMultiSchema := len(tablesBySchema) > 1
 
 	cmds := []string{
 		"set -euo pipefail",
@@ -193,6 +196,22 @@ func (b *BackupCommand) MariadbDump(backup *mariadbv1alpha1.Backup,
 			"printf \"${BACKUP_FILE}\" > %s",
 			b.TargetFilePath,
 		),
+	}
+
+	dumpArgs := args
+	if isMultiSchema {
+		cmds = append(cmds,
+			"echo 💾 Building ignore-table flags",
+			fmt.Sprintf(
+				`MARIADB_IGNORE_ARGS=$(mariadb %s -BNe "%s" | tr '\n' ' ')`,
+				connFlags,
+				buildIgnoreTableQuery(tablesBySchema),
+			),
+		)
+		dumpArgs = args + " ${MARIADB_IGNORE_ARGS}"
+	}
+
+	cmds = append(cmds,
 		fmt.Sprintf(
 			"echo 💾 Taking backup: %s",
 			b.getTargetFilePath(),
@@ -200,10 +219,10 @@ func (b *BackupCommand) MariadbDump(backup *mariadbv1alpha1.Backup,
 		fmt.Sprintf(
 			"mariadb-dump %s %s > %s",
 			connFlags,
-			args,
+			dumpArgs,
 			b.getTargetFilePath(),
 		),
-	}
+	)
 	return NewBashCommand(cmds), nil
 }
 
@@ -534,10 +553,23 @@ func (b *BackupCommand) mariadbDumpArgs(backup *mariadbv1alpha1.Backup, mariadb 
 			dumpOpts = ds.Remove(dumpOpts, hasDatabasesOpt)
 		}
 	} else if len(backup.Spec.Tables) > 0 {
-		// --databases db --tables tbl1 tbl2 includes CREATE DATABASE / USE statements
-		// (the plain positional form does not), which are required for a clean restore.
-		db, _ := tableSelectionArgs(backup.Spec.Tables)
-		args = append(args, "--databases", db)
+		tablesBySchema := groupTablesBySchema(backup.Spec.Tables)
+		if len(tablesBySchema) > 1 {
+			// Multi-schema: list all target databases; per-table filtering is applied at
+			// runtime via --ignore-table flags built by querying information_schema.
+			schemas := make([]string, 0, len(tablesBySchema))
+			for s := range tablesBySchema {
+				schemas = append(schemas, s)
+			}
+			sort.Strings(schemas)
+			args = append(args, "--databases")
+			args = append(args, schemas...)
+		} else {
+			// Single schema: --databases db --tables tbl1 tbl2 includes CREATE DATABASE / USE
+			// statements (the plain positional form does not), required for a clean restore.
+			db, _ := tableSelectionArgs(backup.Spec.Tables)
+			args = append(args, "--databases", db)
+		}
 	} else if !hasDatabases {
 		args = append(args, "--all-databases")
 	}
@@ -563,13 +595,59 @@ func (b *BackupCommand) mariadbDumpArgs(backup *mariadbv1alpha1.Backup, mariadb 
 
 	// --tables must come after all other flags; it overrides --databases to limit
 	// which tables are dumped while still emitting the database context statements.
-	if len(backup.Spec.Tables) > 0 {
+	// Not used for multi-schema: ignore-table flags are injected at runtime instead.
+	if len(backup.Spec.Tables) > 0 && len(groupTablesBySchema(backup.Spec.Tables)) == 1 {
 		_, tables := tableSelectionArgs(backup.Spec.Tables)
 		result = append(result, "--tables")
 		result = append(result, tables...)
 	}
 
 	return result
+}
+
+// groupTablesBySchema groups "db.table" entries into a map of schema → []table.
+func groupTablesBySchema(tables []string) map[string][]string {
+	result := make(map[string][]string)
+	for _, t := range tables {
+		schema, table, found := strings.Cut(t, ".")
+		if !found {
+			continue
+		}
+		result[schema] = append(result[schema], table)
+	}
+	return result
+}
+
+// buildIgnoreTableQuery returns a SQL query that emits one "--ignore-table=schema.table"
+// token per row for every BASE TABLE in the given schemas that is NOT in tablesBySchema.
+func buildIgnoreTableQuery(tablesBySchema map[string][]string) string {
+	schemas := make([]string, 0, len(tablesBySchema))
+	for s := range tablesBySchema {
+		schemas = append(schemas, s)
+	}
+	sort.Strings(schemas)
+
+	quotedSchemas := make([]string, len(schemas))
+	for i, s := range schemas {
+		quotedSchemas[i] = "'" + s + "'"
+	}
+
+	var pairs []string
+	for _, s := range schemas {
+		for _, t := range tablesBySchema[s] {
+			pairs = append(pairs, fmt.Sprintf("('%s','%s')", s, t))
+		}
+	}
+
+	return fmt.Sprintf(
+		"SELECT CONCAT('--ignore-table=', TABLE_SCHEMA, '.', TABLE_NAME)"+
+			" FROM information_schema.TABLES"+
+			" WHERE TABLE_SCHEMA IN (%s)"+
+			" AND TABLE_TYPE='BASE TABLE'"+
+			" AND (TABLE_SCHEMA, TABLE_NAME) NOT IN (%s)",
+		strings.Join(quotedSchemas, ","),
+		strings.Join(pairs, ","),
+	)
 }
 
 // tableSelectionArgs parses "db.table" entries into a database name and table list.

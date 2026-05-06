@@ -84,6 +84,21 @@ var (
 		Namespace: testNamespace,
 	}
 
+	testMdbERMultiSchemaKey = types.NamespacedName{
+		Name:      "mariadb-repl-ext-multi-schema",
+		Namespace: testNamespace,
+	}
+
+	testMdbPbRecoveryERMultiSchemaKey = types.NamespacedName{
+		Name:      testMdbERMultiSchemaKey.Name + "-pb-recovery",
+		Namespace: testNamespace,
+	}
+
+	testPbTemplateERMultiSchemaKey = types.NamespacedName{
+		Name:      testMdbERMultiSchemaKey.Name + "-backup-template",
+		Namespace: testNamespace,
+	}
+
 	testPwdKey = types.NamespacedName{
 		Name:      "password",
 		Namespace: testNamespace,
