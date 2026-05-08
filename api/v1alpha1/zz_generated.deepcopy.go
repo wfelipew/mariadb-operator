@@ -3765,6 +3765,11 @@ func (in *ProbeHandler) DeepCopy() *ProbeHandler {
 func (in *ReplicaBootstrapFrom) DeepCopyInto(out *ReplicaBootstrapFrom) {
 	*out = *in
 	out.PhysicalBackupTemplateRef = in.PhysicalBackupTemplateRef
+	if in.LogicalBackupTemplateRef != nil {
+		in, out := &in.LogicalBackupTemplateRef, &out.LogicalBackupTemplateRef
+		*out = new(LocalObjectReference)
+		**out = **in
+	}
 	if in.RestoreJob != nil {
 		in, out := &in.RestoreJob, &out.RestoreJob
 		*out = new(Job)

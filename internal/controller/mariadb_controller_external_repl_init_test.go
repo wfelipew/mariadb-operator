@@ -108,6 +108,36 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 		By("Expecting to create a PodDisruptionBudget")
 		var pdb policyv1.PodDisruptionBudget
 		Expect(k8sClient.Get(testCtx, key, &pdb)).To(Succeed())
+
+		By("Expecting the logical backup to inherit resources from the template")
+		refResolver := refresolver.New(k8sClient)
+		emdb, err := refResolver.ExternalMariaDB(testCtx, &mdb.Replication().ReplicaFromExternal.MariaDBRef, testNamespace)
+		Expect(err).To(Succeed())
+		var logicalBackup mariadbv1alpha1.Backup
+		Expect(k8sClient.Get(testCtx, types.NamespacedName{
+			Name:      mdb.ExternalReplLogicalBackupName(),
+			Namespace: emdb.Namespace,
+		}, &logicalBackup)).To(Succeed())
+		Expect(logicalBackup.Spec.Resources).NotTo(BeNil())
+		Expect(logicalBackup.Spec.Resources.Limits.Cpu().String()).To(Equal("300m"))
+		Expect(logicalBackup.Spec.Resources.Limits.Memory().String()).To(Equal("512Mi"))
+		Expect(logicalBackup.Spec.Resources.Requests.Cpu().String()).To(Equal("100m"))
+		Expect(logicalBackup.Spec.Resources.Requests.Memory().String()).To(Equal("128Mi"))
+
+		By("Expecting each Restore to inherit resources from replica.bootstrapFrom.restoreJob")
+		for i := 0; i < int(mdb.Spec.Replicas); i++ {
+			var restore mariadbv1alpha1.Restore
+			err := k8sClient.Get(testCtx, mdb.RestoreKeyInPod(i), &restore)
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			Expect(err).To(Succeed())
+			Expect(restore.Spec.Resources).NotTo(BeNil())
+			Expect(restore.Spec.Resources.Limits.Cpu().String()).To(Equal("300m"))
+			Expect(restore.Spec.Resources.Limits.Memory().String()).To(Equal("512Mi"))
+			Expect(restore.Spec.Resources.Requests.Cpu().String()).To(Equal("100m"))
+			Expect(restore.Spec.Resources.Requests.Memory().String()).To(Equal("128Mi"))
+		}
 	})
 
 	It("should recover if replication is broken", func() {

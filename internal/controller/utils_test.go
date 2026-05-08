@@ -69,6 +69,11 @@ var (
 		Namespace: testNamespace,
 	}
 
+	testLogicalBackupTemplateERkey = types.NamespacedName{
+		Name:      testMdbERkey.Name + "-logical-backup-template",
+		Namespace: testNamespace,
+	}
+
 	testMdbERFilteredKey = types.NamespacedName{
 		Name:      "mariadb-repl-ext-filtered",
 		Namespace: testNamespace,
@@ -485,6 +490,52 @@ max_allowed_packet=256M`),
 	By("Creating PhysicalBackup template for external replication recovery")
 	Expect(k8sClient.Create(ctx, &backupTemplate)).To(Succeed())
 
+	logicalBackupTemplate := mariadbv1alpha1.Backup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testLogicalBackupTemplateERkey.Name,
+			Namespace: testLogicalBackupTemplateERkey.Namespace,
+		},
+		Spec: mariadbv1alpha1.BackupSpec{
+			MariaDBRef: mariadbv1alpha1.MariaDBRef{
+				ObjectReference: mariadbv1alpha1.ObjectReference{
+					Name: testEMdbkey.Name,
+				},
+				Kind:      mariadbv1alpha1.ExternalMariaDBKind,
+				WaitForIt: false,
+			},
+			Storage: mariadbv1alpha1.BackupStorage{
+				PersistentVolumeClaim: &mariadbv1alpha1.PersistentVolumeClaimSpec{
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: resource.MustParse("1Gi"),
+						},
+					},
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						corev1.ReadWriteOnce,
+					},
+				},
+			},
+			Schedule: &mariadbv1alpha1.Schedule{
+				Suspend: true,
+			},
+			JobContainerTemplate: mariadbv1alpha1.JobContainerTemplate{
+				Resources: &mariadbv1alpha1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("100m"),
+						corev1.ResourceMemory: resource.MustParse("128Mi"),
+					},
+					Limits: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("300m"),
+						corev1.ResourceMemory: resource.MustParse("512Mi"),
+					},
+				},
+			},
+		},
+	}
+
+	By("Creating Backup template for external replication logical backup")
+	Expect(k8sClient.Create(ctx, &logicalBackupTemplate)).To(Succeed())
+
 	// var GtidSlavePos mariadbv1alpha1.Gtid = "SlavePos"
 
 	mdber := mariadbv1alpha1.MariaDB{
@@ -526,6 +577,21 @@ max_allowed_packet=256M`),
 						ReplicaBootstrapFrom: &mariadbv1alpha1.ReplicaBootstrapFrom{
 							PhysicalBackupTemplateRef: mariadbv1alpha1.LocalObjectReference{
 								Name: testPbTemplateERkey.Name,
+							},
+							LogicalBackupTemplateRef: &mariadbv1alpha1.LocalObjectReference{
+								Name: testLogicalBackupTemplateERkey.Name,
+							},
+							RestoreJob: &mariadbv1alpha1.Job{
+								Resources: &mariadbv1alpha1.ResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("100m"),
+										corev1.ResourceMemory: resource.MustParse("128Mi"),
+									},
+									Limits: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("300m"),
+										corev1.ResourceMemory: resource.MustParse("512Mi"),
+									},
+								},
 							},
 						},
 						// Gtid:                            ptr.To(GtidSlavePos),
@@ -624,6 +690,7 @@ func testCleanupInitialData(ctx context.Context) {
 	var externalPassword corev1.Secret
 	var emdb mariadbv1alpha1.ExternalMariaDB
 	var pbTemplate mariadbv1alpha1.PhysicalBackup
+	var logicalBackupTemplate mariadbv1alpha1.Backup
 	var pbRecoveryPvc corev1.PersistentVolumeClaim
 	var logicalBackupPvc corev1.PersistentVolumeClaim
 	Expect(k8sClient.Get(ctx, testPwdKey, &password)).To(Succeed())
@@ -639,6 +706,9 @@ func testCleanupInitialData(ctx context.Context) {
 	Expect(k8sClient.Delete(ctx, &externalPassword)).To(Succeed())
 	Expect(k8sClient.Get(ctx, testPbTemplateERkey, &pbTemplate)).To(Succeed())
 	Expect(k8sClient.Delete(ctx, &pbTemplate)).To(Succeed())
+	if err := k8sClient.Get(ctx, testLogicalBackupTemplateERkey, &logicalBackupTemplate); err == nil {
+		Expect(k8sClient.Delete(ctx, &logicalBackupTemplate)).To(Succeed())
+	}
 
 	if err := k8sClient.Get(ctx, testMdbPbRecoveryERkey, &pbRecoveryPvc); err == nil {
 		Expect(k8sClient.Delete(ctx, &pbRecoveryPvc)).To(Succeed())

@@ -226,8 +226,12 @@ func (r *MariaDBReconciler) handleInitialBackup(ctx context.Context, mariadb *ma
 	// Create a new backup if required
 	if err != nil || isBackupInvalid {
 		logger.Info("Take a new backup")
+		template, err := r.getLogicalBackupTemplate(ctx, mariadb, replication)
+		if err != nil {
+			return fmt.Errorf("error getting logical backup template: %v", err)
+		}
 		return newBackup(emdb, *r, ctx, binlogExpireLogsDuration, mariadb.GetImagePullSecrets(), mariadb.Spec.Storage.Size,
-			key, replication.ReplicaFromExternal.FilteredReplicaTables)
+			key, replication.ReplicaFromExternal.FilteredReplicaTables, template)
 	}
 
 	if !existingBackup.IsComplete() {
@@ -262,7 +266,8 @@ func removeBackupIfExpired(existingBackup mariadbv1alpha1.Backup, ctx context.Co
 
 func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r MariaDBReconciler, ctx context.Context,
 	binlogExpireLogsDuration time.Duration, imagePullSecrets []mariadbv1alpha1.LocalObjectReference,
-	size *resource.Quantity, key types.NamespacedName, filteredTables []string) error {
+	size *resource.Quantity, key types.NamespacedName, filteredTables []string,
+	template *mariadbv1alpha1.Backup) error {
 
 	args := []string{
 		"--master-data=1",
@@ -298,6 +303,7 @@ func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r MariaDBReconciler, ctx c
 		},
 		MaxRetention:     binlogExpireLogsDuration,
 		ImagePullSecrets: imagePullSecrets,
+		Template:         template,
 	}
 
 	backup, err := r.Builder.BuildBackup(backupOps, emdb)
@@ -308,6 +314,25 @@ func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r MariaDBReconciler, ctx c
 		return fmt.Errorf("error creating base Backup: %v", err)
 	}
 	return nil
+}
+
+// getLogicalBackupTemplate loads the optional Backup template referenced from
+// replica.bootstrapFrom.logicalBackupTemplateRef. Returns nil when the user has not configured a template.
+func (r *MariaDBReconciler) getLogicalBackupTemplate(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
+	replication mariadbv1alpha1.Replication) (*mariadbv1alpha1.Backup, error) {
+	if replication.Replica.ReplicaBootstrapFrom == nil ||
+		replication.Replica.ReplicaBootstrapFrom.LogicalBackupTemplateRef == nil {
+		return nil, nil
+	}
+	tplKey := types.NamespacedName{
+		Name:      replication.Replica.ReplicaBootstrapFrom.LogicalBackupTemplateRef.Name,
+		Namespace: mariadb.Namespace,
+	}
+	var tpl mariadbv1alpha1.Backup
+	if err := r.Get(ctx, tplKey, &tpl); err != nil {
+		return nil, fmt.Errorf("error getting Backup template '%s': %v", tplKey.Name, err)
+	}
+	return &tpl, nil
 }
 
 func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx context.Context,

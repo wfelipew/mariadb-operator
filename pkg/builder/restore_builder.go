@@ -26,6 +26,15 @@ func (b *Builder) BuildRestore(mariadb *mariadbv1alpha1.MariaDB, key types.Names
 	bootstrapFrom := ptr.Deref(mariadb.Spec.BootstrapFrom, mariadbv1alpha1.BootstrapFrom{})
 	restoreJob := ptr.Deref(bootstrapFrom.RestoreJob, mariadbv1alpha1.Job{})
 
+	// External replication doesn't use mariadb.Spec.BootstrapFrom; the restore Job template lives under
+	// replication.replica.bootstrapFrom.restoreJob instead. Pull from there so resources/tolerations/etc.
+	// get applied to the per-replica restore Pods.
+	if mariadb.Replication().ReplicaFromExternal != nil {
+		if rbf := mariadb.Replication().Replica.ReplicaBootstrapFrom; rbf != nil && rbf.RestoreJob != nil {
+			restoreJob = *rbf.RestoreJob
+		}
+	}
+
 	podTpl := mariadbv1alpha1.JobPodTemplate{}
 	podTpl.FromPodTemplate(mariadb.Spec.PodTemplate.DeepCopy())
 	podTpl.Affinity = restoreJob.Affinity

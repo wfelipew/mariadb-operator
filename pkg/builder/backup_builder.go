@@ -24,6 +24,11 @@ type BackupOpts struct {
 	// MaxRetention metav1.Duration
 	MaxRetention     time.Duration
 	ImagePullSecrets []mariadbv1alpha1.LocalObjectReference
+	// Template is an optional Backup whose Spec is used as the base for the new Backup. The fields managed
+	// by the controller (Storage, MariaDBRef, Compression, Args, Tables, MaxRetention, ImagePullSecrets)
+	// are overridden by the values in BackupOpts. The remaining fields (resources, pod template, etc.) are
+	// preserved from the template, which lets callers customize the backup Pod via a templated Backup object.
+	Template *mariadbv1alpha1.Backup
 }
 
 func (b *Builder) BuildBackup(opts BackupOpts, owner metav1.Object) (*mariadbv1alpha1.Backup, error) {
@@ -34,29 +39,33 @@ func (b *Builder) BuildBackup(opts BackupOpts, owner metav1.Object) (*mariadbv1a
 	}
 	objMeta := objMetaBuilder.Build()
 
-	backup := &mariadbv1alpha1.Backup{
-		ObjectMeta: objMeta,
-		Spec: mariadbv1alpha1.BackupSpec{
-			Storage:     opts.Storage,
-			MariaDBRef:  opts.MariaDBRef,
-			Compression: opts.Compression,
-			Tables:      opts.Tables,
-
-			MaxRetention: metav1.Duration{
-				Duration: opts.MaxRetention,
-			},
-			JobContainerTemplate: mariadbv1alpha1.JobContainerTemplate{
-				Args:      opts.Args,
-				Resources: &opts.Resources,
-			},
-			JobPodTemplate: mariadbv1alpha1.JobPodTemplate{
-				Affinity: &opts.Affinity,
-			},
-		},
+	var spec mariadbv1alpha1.BackupSpec
+	if opts.Template != nil {
+		spec = *opts.Template.Spec.DeepCopy()
+	}
+	spec.Storage = opts.Storage
+	spec.MariaDBRef = opts.MariaDBRef
+	spec.Compression = opts.Compression
+	spec.Tables = opts.Tables
+	spec.MaxRetention = metav1.Duration{Duration: opts.MaxRetention}
+	spec.Args = opts.Args
+	// The operator-managed Backup runs as a one-shot Job. A suspended Schedule on the template is what
+	// makes the template object skip Job/CronJob reconciliation; clearing it here ensures the resulting
+	// Backup is reconciled as a regular Job.
+	spec.Schedule = nil
+	if spec.Resources == nil {
+		spec.Resources = &opts.Resources
+	}
+	if spec.Affinity == nil {
+		spec.Affinity = &opts.Affinity
+	}
+	if len(opts.ImagePullSecrets) > 0 {
+		spec.ImagePullSecrets = opts.ImagePullSecrets
 	}
 
-	if len(opts.ImagePullSecrets) > 0 {
-		backup.Spec.ImagePullSecrets = opts.ImagePullSecrets
+	backup := &mariadbv1alpha1.Backup{
+		ObjectMeta: objMeta,
+		Spec:       spec,
 	}
 
 	if owner != nil {

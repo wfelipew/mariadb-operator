@@ -121,6 +121,13 @@ type ReplicaBootstrapFrom struct {
 	// +kubebuilder:validation:Required
 	// +operator-sdk:csv:customresourcedefinitions:type=spec
 	PhysicalBackupTemplateRef LocalObjectReference `json:"physicalBackupTemplateRef"`
+	// LogicalBackupTemplateRef is a reference to a Backup object that will be used as template to create the logical Backup
+	// taken from the external MariaDB during external replication initialization and recovery. The template's Spec is copied
+	// over (resources, pod template, etc.) and the controller overrides the fields that are managed automatically
+	// (MariaDBRef, Storage, Args, Tables, Compression, MaxRetention).
+	// +optional
+	// +operator-sdk:csv:customresourcedefinitions:type=spec
+	LogicalBackupTemplateRef *LocalObjectReference `json:"logicalBackupTemplateRef,omitempty"`
 	// RestoreJob defines additional properties for the Job used to perform the restoration.
 	// +optional
 	// +operator-sdk:csv:customresourcedefinitions:type=spec,xDescriptors={"urn:alm:descriptor:com.tectonic.ui:advanced"}
