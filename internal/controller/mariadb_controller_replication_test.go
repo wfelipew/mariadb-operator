@@ -864,6 +864,8 @@ var _ = Describe("MariaDB replication from external server with filtered tables 
 		excludedInSchema1   = "excluded_in_schema1"
 		excludedInSchema2   = "excluded_in_schema2"
 		otherSchemaTable    = "other_table"
+		viewOnExcluded1     = "view_on_excluded_schema1"
+		viewOnExcluded2     = "view_on_excluded_schema2"
 	)
 
 	var (
@@ -898,6 +900,16 @@ var _ = Describe("MariaDB replication from external server with filtered tables 
 		Expect(externalClient.Exec(testCtx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", otherSchema))).To(Succeed())
 		Expect(externalClient.Exec(testCtx, fmt.Sprintf(
 			"CREATE TABLE IF NOT EXISTS `%s`.`%s` (id INT PRIMARY KEY)", otherSchema, otherSchemaTable,
+		))).To(Succeed())
+
+		By("Creating views that reference excluded tables (must be ignored by the dump)")
+		Expect(externalClient.Exec(testCtx, fmt.Sprintf(
+			"CREATE OR REPLACE VIEW `%s`.`%s` AS SELECT * FROM `%s`.`%s`",
+			schema1, viewOnExcluded1, schema1, excludedInSchema1,
+		))).To(Succeed())
+		Expect(externalClient.Exec(testCtx, fmt.Sprintf(
+			"CREATE OR REPLACE VIEW `%s`.`%s` AS SELECT * FROM `%s`.`%s`",
+			schema2, viewOnExcluded2, schema2, excludedInSchema2,
 		))).To(Succeed())
 
 		By("Creating PhysicalBackup template for multi-schema filtered external replication recovery")
@@ -1144,6 +1156,22 @@ var _ = Describe("MariaDB replication from external server with filtered tables 
 			exists, err = podClient.Exists(testCtx, fmt.Sprintf(
 				"SELECT 1 FROM information_schema.tables WHERE table_schema='%s' AND table_name='%s'",
 				otherSchema, otherSchemaTable,
+			))
+			Expect(err).To(Succeed())
+			Expect(exists).To(BeFalse())
+
+			By(fmt.Sprintf("Expecting Pod %d to NOT have the view referencing the excluded schema1 table", i))
+			exists, err = podClient.Exists(testCtx, fmt.Sprintf(
+				"SELECT 1 FROM information_schema.views WHERE table_schema='%s' AND table_name='%s'",
+				schema1, viewOnExcluded1,
+			))
+			Expect(err).To(Succeed())
+			Expect(exists).To(BeFalse())
+
+			By(fmt.Sprintf("Expecting Pod %d to NOT have the view referencing the excluded schema2 table", i))
+			exists, err = podClient.Exists(testCtx, fmt.Sprintf(
+				"SELECT 1 FROM information_schema.views WHERE table_schema='%s' AND table_name='%s'",
+				schema2, viewOnExcluded2,
 			))
 			Expect(err).To(Succeed())
 			Expect(exists).To(BeFalse())

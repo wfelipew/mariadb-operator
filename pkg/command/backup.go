@@ -619,7 +619,9 @@ func groupTablesBySchema(tables []string) map[string][]string {
 }
 
 // buildIgnoreTableQuery returns a SQL query that emits one "--ignore-table=schema.table"
-// token per row for every BASE TABLE in the given schemas that is NOT in tablesBySchema.
+// token per row for every BASE TABLE or VIEW in the given schemas that is NOT in
+// tablesBySchema. Views are included so the dump doesn't try to recreate views that
+// reference tables excluded from the filtered backup.
 func buildIgnoreTableQuery(tablesBySchema map[string][]string) string {
 	schemas := make([]string, 0, len(tablesBySchema))
 	for s := range tablesBySchema {
@@ -643,7 +645,7 @@ func buildIgnoreTableQuery(tablesBySchema map[string][]string) string {
 		"SELECT CONCAT('--ignore-table=', TABLE_SCHEMA, '.', TABLE_NAME)"+
 			" FROM information_schema.TABLES"+
 			" WHERE TABLE_SCHEMA IN (%s)"+
-			" AND TABLE_TYPE='BASE TABLE'"+
+			" AND TABLE_TYPE IN ('BASE TABLE','VIEW')"+
 			" AND (TABLE_SCHEMA, TABLE_NAME) NOT IN (%s)",
 		strings.Join(quotedSchemas, ","),
 		strings.Join(pairs, ","),
