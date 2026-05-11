@@ -200,15 +200,18 @@ func (b *BackupCommand) MariadbDump(backup *mariadbv1alpha1.Backup,
 
 	dumpArgs := args
 	if isMultiSchema {
+		// mapfile reads each row as a separate array element so identifiers with spaces
+		// (e.g. `lerg`.`LERG 6 ATC`) survive intact; "${MARIADB_IGNORE_ARGS[@]}" expands
+		// each element as one shell word rather than word-splitting on whitespace.
 		cmds = append(cmds,
 			"echo 💾 Building ignore-table flags",
 			fmt.Sprintf(
-				`MARIADB_IGNORE_ARGS=$(mariadb %s -BNe "%s" | tr '\n' ' ')`,
+				`mapfile -t MARIADB_IGNORE_ARGS < <(mariadb %s -BNe "%s")`,
 				connFlags,
 				buildIgnoreTableQuery(tablesBySchema),
 			),
 		)
-		dumpArgs = args + " ${MARIADB_IGNORE_ARGS}"
+		dumpArgs = args + ` "${MARIADB_IGNORE_ARGS[@]}"`
 	}
 
 	cmds = append(cmds,

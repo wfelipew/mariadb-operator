@@ -865,7 +865,7 @@ var _ = Describe("MariaDB replication from external server with filtered tables 
 		excludedInSchema2   = "excluded_in_schema2"
 		otherSchemaTable    = "other_table"
 		viewOnExcluded1     = "view_on_excluded_schema1"
-		viewOnExcluded2     = "view_on_excluded_schema2"
+		viewOnExcluded2     = "view on excluded schema2"
 	)
 
 	var (
