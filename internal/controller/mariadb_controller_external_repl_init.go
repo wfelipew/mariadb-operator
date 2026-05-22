@@ -54,9 +54,9 @@ func (r *MariaDBReconciler) reconcileExternalReplInit(ctx context.Context, maria
 		return ctrl.Result{}, fmt.Errorf("error patching MariaDB status: %v", err)
 	}
 
-	logger.Info("handle init backup")
-	if err := r.handleInitialBackup(ctx, mariadb, replication, logger); err != nil {
-		return ctrl.Result{}, err
+	logger.Info("reconciling init backup")
+	if result, err := r.handleInitialBackup(ctx, mariadb, replication, logger); err != nil || !result.IsZero() {
+		return result, err
 	}
 
 	logger.Info("reconciling restore on each pod")
@@ -71,7 +71,7 @@ func (r *MariaDBReconciler) reconcileExternalReplInit(ctx context.Context, maria
 
 	if total_pods != total_restored_pods {
 		logger.Info("restore in pod in-progress")
-		return ctrl.Result{RequeueAfter: time.Minute * 1}, fmt.Errorf("restore in pod in-progress")
+		return ctrl.Result{RequeueAfter: time.Minute * 1}, nil
 	}
 
 	//cleanup the restore
@@ -99,13 +99,6 @@ func (r *MariaDBReconciler) reconcileRestoreInPod(ctx context.Context, mariadb *
 
 	logger.Info("reconciling restore in pod", "pod", replicaPodIndex)
 
-	// var client *sql.Client
-	// var err error
-	// if client, err = sql.NewClientWithMariaDB(ctx, mariadb, r.RefResolver); err != nil {
-	// 	logger.Error(err, "error getting MariaDB client")
-	// 	return ctrl.Result{}, fmt.Errorf("error getting MariaDB client: %v", err)
-	// }
-
 	replClientSet, err := replication.NewReplicationClientSet(mariadb, r.RefResolver)
 	if err != nil {
 		logger.Error(err, "error getting replica clientset", "err", err, "pod", replicaPodIndex)
@@ -118,9 +111,6 @@ func (r *MariaDBReconciler) reconcileRestoreInPod(ctx context.Context, mariadb *
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, err
 	}
 	defer client.Close()
-
-	// req, err := r.NewReconcileRequest(ctx, mariadb)
-	// client := req.replClientSet.clientForIndex(ctx, replicaPodIndex)
 
 	if err := client.ResetMaster(ctx); err != nil {
 		logger.Error(err, "error reseting master")
@@ -171,6 +161,11 @@ func (r *MariaDBReconciler) reconcileRestoreInPod(ctx context.Context, mariadb *
 		return ctrl.Result{}, fmt.Errorf("new restore attempt%v", err)
 	}
 
+	if err != nil {
+		logger.Error(err, "error creating new restore", "pod", replicaPodIndex)
+		return ctrl.Result{}, fmt.Errorf("error creating new restore: %v", err)
+	}
+
 	logger.Info("restore complete", "pod", replicaPodIndex)
 
 	return ctrl.Result{}, nil
@@ -194,12 +189,12 @@ func (r *MariaDBReconciler) cleanupRestoreInPod(ctx context.Context, mariadb *ma
 }
 
 func (r *MariaDBReconciler) handleInitialBackup(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
-	replication mariadbv1alpha1.Replication, logger logr.Logger) error {
+	replication mariadbv1alpha1.Replication, logger logr.Logger) (ctrl.Result, error) {
 	logger.Info("Reconciling initial logical backup for external replication")
 
 	emdb, err := r.RefResolver.ExternalMariaDB(ctx, &replication.ReplicaFromExternal.MariaDBRef, mariadb.Namespace)
 	if err != nil {
-		return fmt.Errorf("error getting external MariaDB object: %v", err)
+		return ctrl.Result{}, fmt.Errorf("error getting external MariaDB object: %v", err)
 	}
 	key := types.NamespacedName{
 		Name:      mariadb.ExternalReplLogicalBackupName(),
@@ -213,7 +208,7 @@ func (r *MariaDBReconciler) handleInitialBackup(ctx context.Context, mariadb *ma
 
 	logger.Info("Getting the binlog_expire_logs_seconds on the external MariaDB")
 	if binlogExpireLogsDuration, err = getBinlogExpireLogsDuration(emdb, ctx, r.RefResolver); err != nil {
-		return fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+		return ctrl.Result{}, fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
 	}
 
 	logger.Info("Trying to get the current backup")
@@ -223,23 +218,25 @@ func (r *MariaDBReconciler) handleInitialBackup(ctx context.Context, mariadb *ma
 		logger.Info("Backup exists, check if it is expired")
 		isBackupInvalid = removeBackupIfExpired(existingBackup, ctx, binlogExpireLogsDuration, *r)
 	}
+
 	// Create a new backup if required
 	if err != nil || isBackupInvalid {
 		logger.Info("Take a new backup")
 		template, err := r.getLogicalBackupTemplate(ctx, mariadb, replication)
 		if err != nil {
-			return fmt.Errorf("error getting logical backup template: %v", err)
+			return ctrl.Result{}, fmt.Errorf("error getting logical backup template: %v", err)
 		}
-		return newBackup(emdb, *r, ctx, binlogExpireLogsDuration, mariadb.GetImagePullSecrets(), mariadb.Spec.Storage.Size,
+		backup_error := newBackup(emdb, *r, ctx, binlogExpireLogsDuration, mariadb.GetImagePullSecrets(), mariadb.Spec.Storage.Size,
 			key, replication.ReplicaFromExternal.FilteredReplicaTables, template)
+		return ctrl.Result{RequeueAfter: time.Minute * 1}, backup_error
 	}
 
 	if !existingBackup.IsComplete() {
 		logger.Info("Backup is running")
-		return fmt.Errorf("backup still running")
+		return ctrl.Result{RequeueAfter: time.Minute * 1}, nil
 	}
 
-	return nil
+	return ctrl.Result{}, nil
 }
 
 func (r *MariaDBReconciler) replicationPodIndexes(mariadb *mariadbv1alpha1.MariaDB) []int {

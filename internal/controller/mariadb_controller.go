@@ -371,6 +371,7 @@ func (r *MariaDBReconciler) reconcileRBAC(ctx context.Context, mariadb *mariadbv
 
 func (r *MariaDBReconciler) reconcileStatefulSet(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB) (ctrl.Result, error) {
 	key := client.ObjectKeyFromObject(mariadb)
+
 	updateAnnotations, err := r.getUpdateAnnotations(ctx, mariadb)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("error getting Pod annotations: %v", err)

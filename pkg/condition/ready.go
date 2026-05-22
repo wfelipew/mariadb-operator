@@ -127,6 +127,24 @@ func SetReadyWithMariaDB(c Conditioner, sts *appsv1.StatefulSet, mdb *mariadbv1a
 		})
 		return
 	}
+	if mdb.IsExternalReplInitialing() {
+		if err := mdb.ExternalReplInitError(); err != nil {
+			c.SetCondition(metav1.Condition{
+				Type:    mariadbv1alpha1.ConditionTypeReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  mariadbv1alpha1.ConditionReasonExternalReplInitError,
+				Message: err.Error(),
+			})
+			return
+		}
+		c.SetCondition(metav1.Condition{
+			Type:    mariadbv1alpha1.ConditionTypeReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  mariadbv1alpha1.ConditionReasonExternalReplInitializing,
+			Message: "Initializing external replication",
+		})
+		return
+	}
 	if mdb.IsUpdating() {
 		c.SetCondition(metav1.Condition{
 			Type:    mariadbv1alpha1.ConditionTypeReady,
@@ -155,6 +173,19 @@ func SetReadyWithMariaDB(c Conditioner, sts *appsv1.StatefulSet, mdb *mariadbv1a
 		})
 		return
 	}
+
+	replication := mdb.Replication()
+	// Pending External Replication initialization
+	if replication.IsExternalReplication() && !mdb.IsExternalReplInitialing() && !mdb.IsExternalReplInitialized() {
+		c.SetCondition(metav1.Condition{
+			Type:    mariadbv1alpha1.ConditionTypeReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  mariadbv1alpha1.ConditionReasonPendingExternalReplInitialization,
+			Message: "Pending external replication initialization",
+		})
+		return
+	}
+
 	c.SetCondition(metav1.Condition{
 		Type:    mariadbv1alpha1.ConditionTypeReady,
 		Status:  metav1.ConditionTrue,

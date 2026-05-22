@@ -548,6 +548,11 @@ func (m *MariaDB) IsExternalReplInitialized() bool {
 	return meta.IsStatusConditionTrue(m.Status.Conditions, ConditionTypeExternalReplInitialized)
 }
 
+// IsExternalReplInitialing indicates that the external replication initialization is in progress.
+func (m *MariaDB) IsExternalReplInitialing() bool {
+	return meta.IsStatusConditionFalse(m.Status.Conditions, ConditionTypeExternalReplInitialized)
+}
+
 // ExternalReplLogicalBackupName returns the name of the logical Backup object used during external replication init.
 func (m *MariaDB) ExternalReplLogicalBackupName() string {
 	ext := m.Replication().ReplicaFromExternal
@@ -571,6 +576,18 @@ func (m *MariaDB) ReplicaRecoveryError() error {
 		return nil
 	}
 	if c.Status == metav1.ConditionFalse && c.Reason == ConditionReasonReplicaRecoverError {
+		return errors.New(c.Message)
+	}
+	return nil
+}
+
+// ExternalReplInitError indicates that the MariaDB instance has an external replication initialization error.
+func (m *MariaDB) ExternalReplInitError() error {
+	c := meta.FindStatusCondition(m.Status.Conditions, ConditionTypeExternalReplInitialized)
+	if c == nil {
+		return nil
+	}
+	if c.Status == metav1.ConditionFalse && c.Reason == ConditionReasonExternalReplInitError {
 		return errors.New(c.Message)
 	}
 	return nil

@@ -568,10 +568,21 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 					fmt.Fprintf(GinkgoWriter, "AFTER DELETE POD, GET STATUS, ERROR %v\n", err)
 					return false
 				}
-
 				return mdb.IsRecoveringReplicas()
 
 			}, testHighTimeout, testInterval).Should(BeTrue())
+
+			By("Expecting Logical backup to replaced eventually")
+			Eventually(func() bool {
+				if err := k8sClient.Get(testCtx, logicalBackupKey, &existingLogicalBackup); err != nil {
+					return false
+				}
+				secondLogicalBackupCreationTimestamp := existingLogicalBackup.CreationTimestamp.Time
+				return secondLogicalBackupCreationTimestamp.After(firstLogicalBackupCreationTimestamp)
+			}, testHighTimeout, testInterval).Should(BeTrue())
+
+			// Revert binlog_expire_logs_seconds to 30 days on the master server to avoid issues with other tests
+			Expect(client.SetSystemVariable(testCtx, "expire_logs_days", "30")).To(Succeed())
 
 			By("Expecting MariaDB to be ready eventually")
 			Eventually(func() bool {
