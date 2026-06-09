@@ -54,6 +54,18 @@ func (r *MariaDBReconciler) reconcileExternalReplInit(ctx context.Context, maria
 		return ctrl.Result{}, fmt.Errorf("error patching MariaDB status: %v", err)
 	}
 
+	// Ensure External MariaDB is ready before proceeding with the backup and restore
+
+	emdb, err := r.RefResolver.ExternalMariaDB(ctx, &replication.ReplicaFromExternal.MariaDBRef, mariadb.Namespace)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("error getting external MariaDB object: %v", err)
+	}
+
+	if emdb.IsReady() == false {
+		logger.Info("external MariaDB is not ready")
+		return ctrl.Result{RequeueAfter: time.Minute * 1}, nil
+	}
+
 	logger.Info("reconciling init backup")
 	if result, err := r.handleInitialBackup(ctx, mariadb, replication, logger); err != nil || !result.IsZero() {
 		return result, err
@@ -234,6 +246,14 @@ func (r *MariaDBReconciler) handleInitialBackup(ctx context.Context, mariadb *ma
 	if !existingBackup.IsComplete() {
 		logger.Info("Backup is running")
 		return ctrl.Result{RequeueAfter: time.Minute * 1}, nil
+	}
+
+	if existingBackup.IsFailed() {
+		logger.Info("Backup has failed, deleting and retrying")
+		if err := r.Delete(ctx, &existingBackup); err != nil {
+			return ctrl.Result{}, fmt.Errorf("error deleting failed Backup: %v", err)
+		}
+		return ctrl.Result{}, fmt.Errorf("Backup failed, retrying")
 	}
 
 	return ctrl.Result{}, nil

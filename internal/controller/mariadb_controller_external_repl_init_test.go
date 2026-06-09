@@ -748,3 +748,97 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 	})
 
 })
+
+var _ = Describe("MariaDB replication from external server config drift", Ordered, func() {
+
+	var (
+		key = testMdbERkey
+		mdb = &mariadbv1alpha1.MariaDB{}
+	)
+
+	BeforeEach(func() {
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady() && mdb.IsExternalReplInitialized()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+	})
+
+	It("should heal external master connection drift", func() {
+		By("Getting the desired external master host")
+		var emdb mariadbv1alpha1.ExternalMariaDB
+		Expect(k8sClient.Get(testCtx, testEMdbkey, &emdb)).To(Succeed())
+		desiredHost := emdb.GetHost()
+		Expect(desiredHost).NotTo(BeEmpty())
+
+		// RFC 5737 TEST-NET-1 address, guaranteed not to be the real external master.
+		const bogusHost = "192.0.2.123"
+
+		By("Pointing every replica at a bogus master to simulate connection drift")
+		refResolver := refresolver.New(k8sClient)
+		for i := 0; i < int(mdb.Spec.Replicas); i++ {
+			podClient, err := sqlClient.NewInternalClientWithPodIndex(testCtx, mdb, refResolver, i)
+			Expect(err).To(Succeed())
+			defer podClient.Close()
+
+			Expect(podClient.StopAllSlaves(testCtx)).To(Succeed())
+			Expect(podClient.Exec(testCtx, fmt.Sprintf("CHANGE MASTER TO MASTER_HOST='%s';", bogusHost))).To(Succeed())
+
+			By(fmt.Sprintf("Verifying Pod %d master host has drifted", i))
+			status, err := podClient.QueryColumnMap(testCtx, "SHOW REPLICA STATUS")
+			Expect(err).To(Succeed())
+			Expect(status["Master_Host"]).To(Equal(bogusHost))
+		}
+
+		By("Expecting the operator to re-point every replica at the external master and resume replication")
+		refResolver2 := refresolver.New(k8sClient)
+		for i := 0; i < int(mdb.Spec.Replicas); i++ {
+			podClient, err := sqlClient.NewInternalClientWithPodIndex(testCtx, mdb, refResolver2, i)
+			Expect(err).To(Succeed())
+			defer podClient.Close()
+
+			Eventually(func(g Gomega) {
+				status, err := podClient.QueryColumnMap(testCtx, "SHOW REPLICA STATUS")
+				g.Expect(err).To(Succeed())
+				g.Expect(status["Master_Host"]).To(Equal(desiredHost))
+				g.Expect(status["Slave_IO_Running"]).To(Equal("Yes"))
+			}, testHighTimeout, testInterval).Should(Succeed(),
+				fmt.Sprintf("Pod %d should be re-pointed at the external master", i))
+		}
+	})
+
+	It("should re-apply the replication password on an authentication error", func() {
+		// The master host and user are left untouched: only the password is broken. This exercises
+		// the authentication-error repair path specifically, since no host/port/user drift exists.
+		By("Breaking the replication credentials on every replica to trigger an authentication error")
+		refResolver := refresolver.New(k8sClient)
+		for i := 0; i < int(mdb.Spec.Replicas); i++ {
+			podClient, err := sqlClient.NewInternalClientWithPodIndex(testCtx, mdb, refResolver, i)
+			Expect(err).To(Succeed())
+			defer podClient.Close()
+
+			Expect(podClient.StopAllSlaves(testCtx)).To(Succeed())
+			Expect(podClient.Exec(testCtx, "CHANGE MASTER TO MASTER_PASSWORD='wrong-password';")).To(Succeed())
+			Expect(podClient.StartSlave(testCtx)).To(Succeed())
+		}
+
+		By("Expecting the operator to re-apply the credentials and restore healthy replication")
+		refResolver2 := refresolver.New(k8sClient)
+		for i := 0; i < int(mdb.Spec.Replicas); i++ {
+			podClient, err := sqlClient.NewInternalClientWithPodIndex(testCtx, mdb, refResolver2, i)
+			Expect(err).To(Succeed())
+			defer podClient.Close()
+
+			Eventually(func(g Gomega) {
+				status, err := podClient.QueryColumnMap(testCtx, "SHOW REPLICA STATUS")
+				g.Expect(err).To(Succeed())
+				g.Expect(status["Slave_IO_Running"]).To(Equal("Yes"))
+				g.Expect(status["Slave_SQL_Running"]).To(Equal("Yes"))
+			}, testHighTimeout, testInterval).Should(Succeed(),
+				fmt.Sprintf("Pod %d should resume replication after credential repair", i))
+		}
+	})
+
+})

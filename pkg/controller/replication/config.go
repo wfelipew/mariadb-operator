@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"strconv"
+	"strings"
 
+	"github.com/go-logr/logr"
 	mariadbv1alpha1 "github.com/mariadb-operator/mariadb-operator/v25/api/v1alpha1"
 	"github.com/mariadb-operator/mariadb-operator/v25/pkg/builder"
 	builderpki "github.com/mariadb-operator/mariadb-operator/v25/pkg/builder/pki"
@@ -225,6 +228,111 @@ func (r *ReplicationConfigClient) changeMaster(ctx context.Context, mariadb *mar
 		return fmt.Errorf("error changing master: %v", err)
 	}
 	return nil
+}
+
+// externalMasterEndpoint resolves the master connection details (host, port and user) that an
+// external replica should currently be replicating from, reading them from the referenced
+// ExternalMariaDB resource.
+func (r *ReplicationConfigClient) externalMasterEndpoint(ctx context.Context,
+	mariadb *mariadbv1alpha1.MariaDB) (host string, port int32, user string, err error) {
+	replication := mariadb.Replication()
+	emdbRef := replication.GetExternalReplicationRef()
+	emdb, err := r.refResolver.ExternalMariaDB(ctx, &emdbRef, mariadb.Namespace)
+	if err != nil {
+		return "", 0, "", fmt.Errorf("error getting ExternalMariaDB: %v", err)
+	}
+	port = emdb.GetPort()
+	if emdb.GetBinlogProxyPort() != nil {
+		port = *emdb.GetBinlogProxyPort()
+	}
+	return emdb.GetHost(), port, emdb.GetSUName(), nil
+}
+
+// replicaAuthErrnos are the IO thread error codes MariaDB reports when the replica cannot
+// authenticate against the master, e.g. after the replication password has been rotated.
+var replicaAuthErrnos = map[int32]struct{}{
+	1045: {}, // ER_ACCESS_DENIED_ERROR
+	1698: {}, // ER_ACCESS_DENIED_NO_PASSWORD_ERROR
+}
+
+// isReplicaAuthError reports whether the replica IO thread is failing to authenticate against
+// the master. The password configured on the replica cannot be read back, so an access-denied
+// error is our only signal that a rotated password needs to be re-applied.
+func isReplicaAuthError(ioRunning, lastIOErrno, lastIOError string) bool {
+	if ioRunning == "Yes" {
+		return false
+	}
+	if errno, err := strconv.Atoi(lastIOErrno); err == nil {
+		if _, ok := replicaAuthErrnos[int32(errno)]; ok {
+			return true
+		}
+	}
+	return strings.Contains(strings.ToLower(lastIOError), "access denied")
+}
+
+// ReconcileExternalReplicaDrift re-points a replica that is already configured for external
+// replication at the current ExternalMariaDB connection details when it has drifted.
+//
+// It repairs in two cases:
+//   - The configured master host, port or user no longer matches the ExternalMariaDB endpoint.
+//   - The replica IO thread is failing with an authentication error. The configured password
+//     cannot be read back, so re-issuing CHANGE MASTER (which always re-sends the current secret
+//     value) is how a rotated replication password gets applied.
+//
+// Unlike ConfigureReplica, this performs a minimal, non-destructive repair: it does NOT reset the
+// master nor require a GTID position. It only stops the slave threads (when they are running),
+// issues CHANGE MASTER with the updated connection details (keeping MASTER_USE_GTID=current_pos)
+// and starts the slave again. It returns true when a repair was performed.
+func (r *ReplicationConfigClient) ReconcileExternalReplicaDrift(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
+	client *sql.Client, primaryPodIndex int, logger logr.Logger) (bool, error) {
+	desiredHost, desiredPort, desiredUser, err := r.externalMasterEndpoint(ctx, mariadb)
+	if err != nil {
+		return false, fmt.Errorf("error getting external master endpoint: %v", err)
+	}
+
+	// Read SHOW REPLICA STATUS as a column map rather than via a positional scan so the check is
+	// resilient to column ordering changes across MariaDB versions.
+	status, err := client.QueryColumnMap(ctx, "SHOW REPLICA STATUS")
+	if err != nil {
+		return false, fmt.Errorf("error getting replica status: %v", err)
+	}
+	currentHost := status["Master_Host"]
+	currentPort := status["Master_Port"]
+	currentUser := status["Master_User"]
+	ioRunning := status["Slave_IO_Running"]
+	sqlRunning := status["Slave_SQL_Running"]
+
+	endpointDrift := currentHost != desiredHost ||
+		currentPort != strconv.Itoa(int(desiredPort)) ||
+		currentUser != desiredUser
+	authError := isReplicaAuthError(ioRunning, status["Last_IO_Errno"], status["Last_IO_Error"])
+
+	if !endpointDrift && !authError {
+		return false, nil
+	}
+
+	if endpointDrift {
+		logger.Info("external replica master drift detected, repairing",
+			"current-host", currentHost, "current-port", currentPort, "current-user", currentUser,
+			"desired-host", desiredHost, "desired-port", desiredPort, "desired-user", desiredUser)
+	}
+	if authError {
+		logger.Info("external replica authentication error detected, re-applying credentials",
+			"last-io-errno", status["Last_IO_Errno"], "last-io-error", status["Last_IO_Error"])
+	}
+
+	if ioRunning != "No" || sqlRunning != "No" {
+		if err := client.StopAllSlaves(ctx); err != nil {
+			return false, fmt.Errorf("error stopping slaves: %v", err)
+		}
+	}
+	if err := r.changeMaster(ctx, mariadb, client, primaryPodIndex); err != nil {
+		return false, fmt.Errorf("error changing master: %v", err)
+	}
+	if err := client.StartSlave(ctx); err != nil {
+		return false, fmt.Errorf("error starting slave: %v", err)
+	}
+	return true, nil
 }
 
 func (r *ReplicationConfigClient) reconcilePrimarySql(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB, client *sql.Client) error {

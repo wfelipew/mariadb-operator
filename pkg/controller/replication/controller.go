@@ -266,6 +266,21 @@ func (r *ReplicationReconciler) ReconcileReplicationInPod(ctx context.Context, r
 	if !opts.forceReplicaConfiguration {
 		role, ok := replRoles[pod]
 		if ok && role == mariadbv1alpha1.ReplicationRoleReplica {
+			if !isExternalReplication {
+				return ctrl.Result{}, nil
+			}
+			// For external replication the master connection details live in the ExternalMariaDB
+			// resource and may change over time. Detect drift and re-point the replica without
+			// resetting the master/GTID position.
+			client, err := req.replClientSet.clientForIndex(ctx, podIndex)
+			if err != nil {
+				logger.V(1).Info("error getting replica client", "err", err, "pod", pod)
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+			if _, err := r.replConfigClient.ReconcileExternalReplicaDrift(ctx, req.mariadb, client, primaryPodIndex, logger); err != nil {
+				logger.Error(err, "error reconciling external replica drift", "pod", pod)
+				return ctrl.Result{}, fmt.Errorf("error reconciling external replica drift: %v", err)
+			}
 			return ctrl.Result{}, nil
 		}
 	}

@@ -126,6 +126,11 @@ func (b *Backup) IsComplete() bool {
 	return meta.IsStatusConditionTrue(b.Status.Conditions, ConditionTypeComplete)
 }
 
+func (b *Backup) IsFailed() bool {
+	condition := meta.FindStatusCondition(b.Status.Conditions, ConditionTypeComplete)
+	return condition != nil && condition.Status == metav1.ConditionTrue && condition.Reason == ConditionReasonJobFailed
+}
+
 func (b *Backup) Validate() error {
 	if b.Spec.Schedule != nil {
 		if err := b.Spec.Schedule.Validate(); err != nil {
