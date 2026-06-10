@@ -31,9 +31,7 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 
 		By("Expecting MariaDB to be ready eventually")
 		Eventually(func() bool {
-			fmt.Fprintf(GinkgoWriter, "Trying to get %v \n", testMdbERkey.Name)
 			if err := k8sClient.Get(testCtx, testMdbERkey, mdb); err != nil {
-				fmt.Fprintf(GinkgoWriter, "Error %v \n", err)
 				return false
 			}
 			return mdb.IsReady()
@@ -189,7 +187,6 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 			}
 			condition := meta.FindStatusCondition(mdb.Status.Conditions, mariadbv1alpha1.ConditionTypeReady)
 			return condition != nil && condition.Status == metav1.ConditionTrue
-			// return (mdb.Status.Replication.Roles)[statefulset.PodName(mdb.ObjectMeta, podIndex)] == mariadbv1alpha1.ReplicationRoleReplica
 		}, testHighTimeout, testInterval).Should(BeTrue())
 
 		var endpoints discoveryv1.EndpointSlice
@@ -284,10 +281,8 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 		Eventually(func() bool {
 			rStatus, err := client.GetReplicationStatus(testCtx)
 			if err != nil {
-				fmt.Fprintf(GinkgoWriter, "Error - Not Expecting 1236, got error %v \n", err)
 				return false
 			}
-			fmt.Fprintf(GinkgoWriter, "Error - Not Expecting 1236, got %v \n", rStatus.LastIOErrno.Int32)
 			return rStatus.LastIOErrno.Int32 != 1236
 
 		}, testHighTimeout, testInterval).Should(BeTrue())
@@ -368,16 +363,12 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 			client.Exec(testCtx, "INSERT INTO t VALUES (1);"),
 		).To(Succeed())
 
-		fmt.Fprintf(GinkgoWriter, "PRE DELETE POD\n")
 		testDeletePod(mdb, 2, true)
-		fmt.Fprintf(GinkgoWriter, "AFTER DELETE POD\n")
 
 		// Expect to get in recovering state eventually
 		By("Expecting MariaDB to be in recovering state eventually")
 		Eventually(func() bool {
-			fmt.Fprintf(GinkgoWriter, "AFTER DELETE POD, GET STATUS\n")
 			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
-				fmt.Fprintf(GinkgoWriter, "AFTER DELETE POD, GET STATUS, ERROR %v\n", err)
 				return false
 			}
 
@@ -465,9 +456,7 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 
 		By("Expecting MariaDB to be in recovering state eventually")
 		Eventually(func() bool {
-			fmt.Fprintf(GinkgoWriter, "AFTER DELETE POD, GET STATUS\n")
 			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
-				fmt.Fprintf(GinkgoWriter, "AFTER DELETE POD, GET STATUS, ERROR %v\n", err)
 				return false
 			}
 
@@ -563,9 +552,7 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 
 			By("Expecting MariaDB to be in recovering state eventually")
 			Eventually(func() bool {
-				fmt.Fprintf(GinkgoWriter, "AFTER DELETE POD, GET STATUS\n")
 				if err := k8sClient.Get(testCtx, key, mdb); err != nil {
-					fmt.Fprintf(GinkgoWriter, "AFTER DELETE POD, GET STATUS, ERROR %v\n", err)
 					return false
 				}
 				return mdb.IsRecoveringReplicas()

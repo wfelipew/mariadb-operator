@@ -277,6 +277,7 @@ func (r *ReplicationReconciler) ReconcileReplicationInPod(ctx context.Context, r
 				logger.V(1).Info("error getting replica client", "err", err, "pod", pod)
 				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 			}
+			defer client.Close()
 			if _, err := r.replConfigClient.ReconcileExternalReplicaDrift(ctx, req.mariadb, client, primaryPodIndex, logger); err != nil {
 				logger.Error(err, "error reconciling external replica drift", "pod", pod)
 				return ctrl.Result{}, fmt.Errorf("error reconciling external replica drift: %v", err)
@@ -290,6 +291,7 @@ func (r *ReplicationReconciler) ReconcileReplicationInPod(ctx context.Context, r
 		logger.V(1).Info("error getting replica client", "err", err, "pod", pod)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
+	defer client.Close()
 	logger.Info("Configuring replica", "pod", pod)
 
 	replicaOpts, err := r.getReplicaOpts(ctx, req, pod, podIndex, logger, reconcilePodOpts...)

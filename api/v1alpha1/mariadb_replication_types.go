@@ -543,7 +543,7 @@ func (m *MariaDB) IsRecoveringReplicas() bool {
 	return meta.IsStatusConditionFalse(m.Status.Conditions, ConditionTypeReplicaRecovered)
 }
 
-// IsGaleraInitialized indicates that the Galera init Job has successfully completed.
+// IsExternalReplInitialized indicates that the external replication init Job has successfully completed.
 func (m *MariaDB) IsExternalReplInitialized() bool {
 	return meta.IsStatusConditionTrue(m.Status.Conditions, ConditionTypeExternalReplInitialized)
 }

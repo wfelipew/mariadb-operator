@@ -676,10 +676,6 @@ max_allowed_packet=256M`),
 
 	By("Creating MariaDB with external replication")
 	Expect(k8sClient.Create(testCtx, &mdber)).To(Succeed())
-	// DeferCleanup(func() {
-	// 	deleteMariadb(key, false)
-	// })
-
 	expectMariadbReady(ctx, k8sClient, testMdbERkey)
 
 }

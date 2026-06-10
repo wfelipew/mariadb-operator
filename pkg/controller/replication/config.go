@@ -103,9 +103,6 @@ func (r *ReplicationConfigClient) ConfigureReplica(ctx context.Context, mariadb 
 		setOpt(&opts)
 	}
 
-	// replication := mariadb.Replication()
-	// isExternalReplication := replication.IsExternalReplication()
-
 	if err := client.ResetMaster(ctx); err != nil {
 		return fmt.Errorf("error resetting master: %v", err)
 	}
@@ -125,15 +122,6 @@ func (r *ReplicationConfigClient) ConfigureReplica(ctx context.Context, mariadb 
 		return fmt.Errorf("error enabling read_only: %v", err)
 	}
 
-	// isReplicationConfigured, _ := client.IsReplicationConfigured(ctx)
-
-	// if isExternalReplication && !isReplicationConfigured {
-
-	// 	if ready, err := r.configureExternalReplica(ctx, mariadb, replicaPodIndex); !ready || err != nil {
-	// 		return err
-	// 	}
-	// }
-
 	if err := r.changeMaster(ctx, mariadb, client, primaryPodIndex, opts.ChangeMasterOpts...); err != nil {
 		return fmt.Errorf("error changing master: %v", err)
 	}
@@ -142,12 +130,6 @@ func (r *ReplicationConfigClient) ConfigureReplica(ctx context.Context, mariadb 
 	}
 	return nil
 }
-
-// func (r *ReplicationConfigClient) configureExternalReplica(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
-// 	replicaPodIndex int) (bool, error) {
-
-// 	return true, nil
-// }
 
 func (r *ReplicationConfigClient) changeMaster(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB, client *sql.Client,
 	primaryPodIndex int, opts ...sql.ChangeMasterOpt) error {
@@ -522,10 +504,6 @@ func externalReplPasswordRef(mariadb *mariadbv1alpha1.MariaDB, r *refresolver.Re
 		Key: "",
 	}, fmt.Errorf("not able to get PasswordRef for external replication")
 }
-
-// func serverId(index int) string {
-// 	return fmt.Sprint(10 + index)
-// }
 
 func offsetServerId(podName string, offset int) (int, error) {
 	podIndex, err := statefulset.PodIndex(podName)

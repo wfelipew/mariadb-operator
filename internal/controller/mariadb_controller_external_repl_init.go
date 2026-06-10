@@ -22,6 +22,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// reconcileExternalReplInit handles the initialization of external replication for a MariaDB cluster.
+// It ensures that a backup of the external MariaDB is taken and restored to the replica pods
+// before marking the external replication as initialized.
 func (r *MariaDBReconciler) reconcileExternalReplInit(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithName("external-repl-init")
 
@@ -66,12 +69,12 @@ func (r *MariaDBReconciler) reconcileExternalReplInit(ctx context.Context, maria
 		return ctrl.Result{RequeueAfter: time.Minute * 1}, nil
 	}
 
-	logger.Info("reconciling init backup")
+	logger.Info("reconciling logical backup")
 	if result, err := r.handleInitialBackup(ctx, mariadb, replication, logger); err != nil || !result.IsZero() {
 		return result, err
 	}
 
-	logger.Info("reconciling restore on each pod")
+	logger.Info("reconciling logical restore on each pod")
 	total_pods := 0
 	total_restored_pods := 0
 	for _, i := range r.replicationPodIndexes(mariadb) {
@@ -106,6 +109,7 @@ func (r *MariaDBReconciler) reconcileExternalReplInit(ctx context.Context, maria
 	return ctrl.Result{}, nil
 }
 
+// reconcileRestoreInPod ensures that the given replica pod index is restored from the backup taken from the external MariaDB.
 func (r *MariaDBReconciler) reconcileRestoreInPod(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
 	replicaPodIndex int, logger logr.Logger, removeCurrentPod bool) (ctrl.Result, error) {
 
@@ -148,9 +152,6 @@ func (r *MariaDBReconciler) reconcileRestoreInPod(ctx context.Context, mariadb *
 
 		if removeCurrentPod {
 			logger.Info("Recreating Pod")
-			// if err := r.ensurePodInitializing(ctx, podKey, logger); err != nil {
-			// 	return ctrl.Result{}, fmt.Errorf("error ensuring Pod initializing: %v", err)
-			// }
 
 			pvcKey := mariadb.PVCKey(builder.StorageVolume, replicaPodIndex)
 			var pvc corev1.PersistentVolumeClaim
@@ -183,6 +184,8 @@ func (r *MariaDBReconciler) reconcileRestoreInPod(ctx context.Context, mariadb *
 	return ctrl.Result{}, nil
 }
 
+// cleanupRestoreInPod deletes the Restore object for the given replica pod index.
+// This is used to clean up the Restore object after the restore is complete.
 func (r *MariaDBReconciler) cleanupRestoreInPod(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
 	replicaPodIndex int, logger logr.Logger) error {
 
@@ -200,6 +203,7 @@ func (r *MariaDBReconciler) cleanupRestoreInPod(ctx context.Context, mariadb *ma
 	return nil
 }
 
+// handleInitialBackup ensures that a valid backup exists for the external MariaDB. If a backup does not exist, it creates a new one.
 func (r *MariaDBReconciler) handleInitialBackup(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
 	replication mariadbv1alpha1.Replication, logger logr.Logger) (ctrl.Result, error) {
 	logger.Info("Reconciling initial logical backup for external replication")
@@ -259,6 +263,7 @@ func (r *MariaDBReconciler) handleInitialBackup(ctx context.Context, mariadb *ma
 	return ctrl.Result{}, nil
 }
 
+// replicationPodIndexes returns the list of pod indexes that are part of the replication setup.
 func (r *MariaDBReconciler) replicationPodIndexes(mariadb *mariadbv1alpha1.MariaDB) []int {
 	podIndexes := []int{
 		*mariadb.Status.CurrentPrimaryPodIndex,
@@ -271,6 +276,9 @@ func (r *MariaDBReconciler) replicationPodIndexes(mariadb *mariadbv1alpha1.Maria
 	return podIndexes
 }
 
+// removeBackupIfExpired checks if the existing backup is expired based on the binlog_expire_logs_seconds value
+// from the external MariaDB.
+// If the backup is expired, it deletes the backup and returns true. Otherwise, it returns false.
 func removeBackupIfExpired(existingBackup mariadbv1alpha1.Backup, ctx context.Context,
 	binlogExpireLogsDuration time.Duration, r MariaDBReconciler) bool {
 	if time.Since(existingBackup.CreationTimestamp.Time) > binlogExpireLogsDuration {
@@ -281,6 +289,8 @@ func removeBackupIfExpired(existingBackup mariadbv1alpha1.Backup, ctx context.Co
 	return false
 }
 
+// newBackup creates a Backup object to take a backup of the external MariaDB.
+// The backup will be used to restore the replica pods.
 func newBackup(emdb *mariadbv1alpha1.ExternalMariaDB, r MariaDBReconciler, ctx context.Context,
 	binlogExpireLogsDuration time.Duration, imagePullSecrets []mariadbv1alpha1.LocalObjectReference,
 	size *resource.Quantity, key types.NamespacedName, filteredTables []string,
@@ -352,6 +362,8 @@ func (r *MariaDBReconciler) getLogicalBackupTemplate(ctx context.Context, mariad
 	return &tpl, nil
 }
 
+// getBinlogExpireLogsDuration gets the binlog_expire_logs_seconds value from
+// the external MariaDB and returns it as a time.Duration.
 func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx context.Context,
 	refResolver *refresolver.RefResolver) (time.Duration, error) {
 	var external_client *sql.Client
@@ -382,6 +394,8 @@ func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx cont
 	return time.Duration(binlogExpireLogsSeconds) * time.Second, nil
 }
 
+// newRestore creates a Restore object for the given replica pod index. The Restore will be responsible for restoring
+// the backup taken from the external MariaDB to the replica pod.
 func newRestore(mariadb *mariadbv1alpha1.MariaDB, r MariaDBReconciler, ctx context.Context, replicaPodIndex int) error {
 	restoreOpts := builder.RestoreOpts{
 		PodIndex: &replicaPodIndex,
@@ -393,6 +407,5 @@ func newRestore(mariadb *mariadbv1alpha1.MariaDB, r MariaDBReconciler, ctx conte
 	if err := r.Create(ctx, restore); err != nil {
 		return fmt.Errorf("error creating Restore object: %v", err)
 	}
-	// return fmt.Errorf("CREATING Restore object: %v", restore.Name)
 	return nil
 }

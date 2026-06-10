@@ -336,22 +336,3 @@ func setMaxScalePrimary(mdb *mariadbv1alpha1.MariaDB, podIndex *int) {
 	mdb.Status.CurrentPrimaryPodIndex = podIndex
 	mdb.Status.CurrentPrimary = ptr.To(stspkg.PodName(mdb.ObjectMeta, *podIndex))
 }
-
-// func IsReplicationPermanentBroken(status sql.ReplicaStatus) bool {
-
-// 	// Requested GTID is not present on the Master binlog
-// 	if status.SlaveIORunning == "No" && status.LastIOErrno.Int32 == 1236 {
-// 		return true
-// 	}
-
-// 	// SlaveSQLRunning="No" with SlaveIORunning="Yes" usually means
-// 	// issues with data consistency.
-// 	if status.SlaveSQLRunning == "No" &&
-// 		status.SlaveIORunning == "Yes" &&
-// 		status.LastSQLError.String != "" {
-// 		return true
-// 	}
-
-// 	return false
-
-// }
