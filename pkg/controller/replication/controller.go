@@ -266,7 +266,9 @@ func (r *ReplicationReconciler) ReconcileReplicationInPod(ctx context.Context, r
 	if !opts.forceReplicaConfiguration {
 		role, ok := replRoles[pod]
 		if ok && role == mariadbv1alpha1.ReplicationRoleReplica {
-			if !isExternalReplication {
+
+			// If not external or is in recovery, we can skip configuration drift checks
+			if !isExternalReplication || req.mariadb.IsRecoveringReplicas() {
 				return ctrl.Result{}, nil
 			}
 			// For external replication the master connection details live in the ExternalMariaDB

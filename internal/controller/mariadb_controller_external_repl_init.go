@@ -70,7 +70,7 @@ func (r *MariaDBReconciler) reconcileExternalReplInit(ctx context.Context, maria
 	}
 
 	logger.Info("reconciling logical backup")
-	if result, err := r.handleInitialBackup(ctx, mariadb, replication, logger); err != nil || !result.IsZero() {
+	if result, err := r.reconcileLogicalBackup(ctx, mariadb, replication, logger); err != nil || !result.IsZero() {
 		return result, err
 	}
 
@@ -204,7 +204,7 @@ func (r *MariaDBReconciler) cleanupRestoreInPod(ctx context.Context, mariadb *ma
 }
 
 // handleInitialBackup ensures that a valid backup exists for the external MariaDB. If a backup does not exist, it creates a new one.
-func (r *MariaDBReconciler) handleInitialBackup(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
+func (r *MariaDBReconciler) reconcileLogicalBackup(ctx context.Context, mariadb *mariadbv1alpha1.MariaDB,
 	replication mariadbv1alpha1.Replication, logger logr.Logger) (ctrl.Result, error) {
 	logger.Info("Reconciling initial logical backup for external replication")
 
@@ -383,9 +383,9 @@ func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx cont
 		}
 		binlogExpireLogsSeconds, _ = strconv.Atoi(binlogExpireLogsSecondsStr)
 	} else {
-		binlogExpireLogsDaysStr, err := external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
+		binlogExpireLogsDaysStr, err := external_client.SystemVariable(ctx, "expire_logs_days")
 		if err != nil {
-			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
+			return time.Duration(0), fmt.Errorf("unable to get expire_logs_days: %v", err)
 		}
 		binlogExpireLogsDays, _ := strconv.Atoi(binlogExpireLogsDaysStr)
 		binlogExpireLogsSeconds = binlogExpireLogsDays * 86400

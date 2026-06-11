@@ -734,16 +734,8 @@ var _ = Describe("MariaDB replication from external server", Ordered, func() {
 		testMariadbVolumeResize(mdb, "400Mi")
 	})
 
-})
+	It("should heal external master connection drift", func() {
 
-var _ = Describe("MariaDB replication from external server config drift", Ordered, func() {
-
-	var (
-		key = testMdbERkey
-		mdb = &mariadbv1alpha1.MariaDB{}
-	)
-
-	BeforeEach(func() {
 		By("Expecting MariaDB to be ready eventually")
 		Eventually(func() bool {
 			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
@@ -751,9 +743,7 @@ var _ = Describe("MariaDB replication from external server config drift", Ordere
 			}
 			return mdb.IsReady() && mdb.IsExternalReplInitialized()
 		}, testHighTimeout, testInterval).Should(BeTrue())
-	})
 
-	It("should heal external master connection drift", func() {
 		By("Getting the desired external master host")
 		var emdb mariadbv1alpha1.ExternalMariaDB
 		Expect(k8sClient.Get(testCtx, testEMdbkey, &emdb)).To(Succeed())
@@ -791,12 +781,22 @@ var _ = Describe("MariaDB replication from external server config drift", Ordere
 				g.Expect(err).To(Succeed())
 				g.Expect(status["Master_Host"]).To(Equal(desiredHost))
 				g.Expect(status["Slave_IO_Running"]).To(Equal("Yes"))
+				g.Expect(status["Slave_SQL_Running"]).To(Equal("Yes"))
 			}, testHighTimeout, testInterval).Should(Succeed(),
 				fmt.Sprintf("Pod %d should be re-pointed at the external master", i))
 		}
 	})
 
 	It("should re-apply the replication password on an authentication error", func() {
+
+		By("Expecting MariaDB to be ready eventually")
+		Eventually(func() bool {
+			if err := k8sClient.Get(testCtx, key, mdb); err != nil {
+				return false
+			}
+			return mdb.IsReady() && mdb.IsExternalReplInitialized()
+		}, testHighTimeout, testInterval).Should(BeTrue())
+
 		// The master host and user are left untouched: only the password is broken. This exercises
 		// the authentication-error repair path specifically, since no host/port/user drift exists.
 		By("Breaking the replication credentials on every replica to trigger an authentication error")

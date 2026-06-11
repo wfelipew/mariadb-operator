@@ -152,7 +152,7 @@ func (r *MariaDBReconciler) reconcileReplicaRecovery(ctx context.Context, mariad
 
 			if err != nil && errors.Is(err, errPhysicalBackupJobLaunchTimeout) {
 				logger.Info("ExternalReplication, PhysicalBackup not able to launch jobs, trigger LogicalBackup", "error", err)
-				if result, err := r.handleInitialBackup(ctx, mariadb, replication, logger); err != nil || !result.IsZero() {
+				if result, err := r.reconcileLogicalBackup(ctx, mariadb, replication, logger); err != nil || !result.IsZero() {
 					return result, err
 				}
 				if _, err := r.reconcileLogicalBackupReplicaRecovery(ctx, replicasToRecover[0], mariadb, logger); err != nil {
