@@ -64,7 +64,7 @@ func (r *MariaDBReconciler) reconcileExternalReplInit(ctx context.Context, maria
 		return ctrl.Result{}, fmt.Errorf("error getting external MariaDB object: %v", err)
 	}
 
-	if emdb.IsReady() == false {
+	if !emdb.IsReady() {
 		logger.Info("external MariaDB is not ready")
 		return ctrl.Result{RequeueAfter: time.Minute * 1}, nil
 	}
@@ -223,7 +223,7 @@ func (r *MariaDBReconciler) reconcileLogicalBackup(ctx context.Context, mariadb 
 	var existingBackup mariadbv1alpha1.Backup
 
 	logger.Info("Getting the binlog_expire_logs_seconds on the external MariaDB")
-	if binlogExpireLogsDuration, err = getBinlogExpireLogsDuration(emdb, ctx, r.RefResolver); err != nil {
+	if binlogExpireLogsDuration, err = getBinlogExpireLogsDuration(emdb, ctx, r.RefResolver, logger); err != nil {
 		return ctrl.Result{}, fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
 	}
 
@@ -231,8 +231,8 @@ func (r *MariaDBReconciler) reconcileLogicalBackup(ctx context.Context, mariadb 
 	err = r.Get(ctx, key, &existingBackup)
 
 	if err == nil {
-		logger.Info("Backup exists, check if it is expired")
-		isBackupInvalid = removeBackupIfExpired(existingBackup, ctx, binlogExpireLogsDuration, *r)
+		logger.Info("Backup exists, check if it is expired. binlogExpireLogsDuration", "duration", binlogExpireLogsDuration.String())
+		isBackupInvalid = removeBackupIfExpired(existingBackup, ctx, binlogExpireLogsDuration, *r, logger)
 	}
 
 	// Create a new backup if required
@@ -257,7 +257,7 @@ func (r *MariaDBReconciler) reconcileLogicalBackup(ctx context.Context, mariadb 
 		if err := r.Delete(ctx, &existingBackup); err != nil {
 			return ctrl.Result{}, fmt.Errorf("error deleting failed Backup: %v", err)
 		}
-		return ctrl.Result{}, fmt.Errorf("Backup failed, retrying")
+		return ctrl.Result{}, fmt.Errorf("backup failed, retrying")
 	}
 
 	return ctrl.Result{}, nil
@@ -280,8 +280,9 @@ func (r *MariaDBReconciler) replicationPodIndexes(mariadb *mariadbv1alpha1.Maria
 // from the external MariaDB.
 // If the backup is expired, it deletes the backup and returns true. Otherwise, it returns false.
 func removeBackupIfExpired(existingBackup mariadbv1alpha1.Backup, ctx context.Context,
-	binlogExpireLogsDuration time.Duration, r MariaDBReconciler) bool {
+	binlogExpireLogsDuration time.Duration, r MariaDBReconciler, logger logr.Logger) bool {
 	if time.Since(existingBackup.CreationTimestamp.Time) > binlogExpireLogsDuration {
+		logger.Info("Backup is expired, deleting it", "backup", existingBackup.Name)
 		if err := r.Delete(ctx, &existingBackup); err == nil {
 			return true
 		}
@@ -365,7 +366,7 @@ func (r *MariaDBReconciler) getLogicalBackupTemplate(ctx context.Context, mariad
 // getBinlogExpireLogsDuration gets the binlog_expire_logs_seconds value from
 // the external MariaDB and returns it as a time.Duration.
 func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx context.Context,
-	refResolver *refresolver.RefResolver) (time.Duration, error) {
+	refResolver *refresolver.RefResolver, logger logr.Logger) (time.Duration, error) {
 	var external_client *sql.Client
 	var err error
 	if external_client, err = sql.NewClientWithMariaDB(ctx, emdb, refResolver); err != nil {
@@ -376,13 +377,15 @@ func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx cont
 	var binlogExpireLogsSecondsStr string
 	var binlogExpireLogsSeconds int
 
-	if semver.Compare(emdb.Status.Version, "10.6.1") >= 0 {
+	if semver.Compare("v"+emdb.Status.Version, "v10.6.1") >= 0 {
+		logger.Info("Using binlog_expire_logs_seconds", "version", emdb.Status.Version)
 		binlogExpireLogsSecondsStr, err = external_client.SystemVariable(ctx, "binlog_expire_logs_seconds")
 		if err != nil {
 			return time.Duration(0), fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
 		}
 		binlogExpireLogsSeconds, _ = strconv.Atoi(binlogExpireLogsSecondsStr)
 	} else {
+		logger.Info("Using expire_logs_days", "version", emdb.Status.Version)
 		binlogExpireLogsDaysStr, err := external_client.SystemVariable(ctx, "expire_logs_days")
 		if err != nil {
 			return time.Duration(0), fmt.Errorf("unable to get expire_logs_days: %v", err)
@@ -390,7 +393,7 @@ func getBinlogExpireLogsDuration(emdb *mariadbv1alpha1.ExternalMariaDB, ctx cont
 		binlogExpireLogsDays, _ := strconv.Atoi(binlogExpireLogsDaysStr)
 		binlogExpireLogsSeconds = binlogExpireLogsDays * 86400
 	}
-
+	logger.Info("binlog expire logs duration", "seconds", binlogExpireLogsSeconds)
 	return time.Duration(binlogExpireLogsSeconds) * time.Second, nil
 }
 

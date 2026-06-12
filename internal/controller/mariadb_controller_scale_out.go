@@ -202,7 +202,7 @@ func (r *MariaDBReconciler) reconcileReplicaPhysicalBackup(ctx context.Context, 
 			return ctrl.Result{}, fmt.Errorf("error getting external MariaDB: %v", err)
 		}
 		logger.Info("Getting the binlog_expire_logs_seconds on the external MariaDB")
-		binlogExpireLogsDuration, binlogExpireErr = getBinlogExpireLogsDuration(emdb, ctx, r.RefResolver)
+		binlogExpireLogsDuration, binlogExpireErr = getBinlogExpireLogsDuration(emdb, ctx, r.RefResolver, logger)
 	} else {
 		logger.Info("Getting the binlog_expire_logs_seconds on primary MariaDB")
 		binlogExpireLogsDuration, binlogExpireErr = getInternalBinlogExpireLogsDuration(mariadb, ctx, r.RefResolver)

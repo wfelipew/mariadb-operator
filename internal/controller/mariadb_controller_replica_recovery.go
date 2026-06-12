@@ -476,7 +476,7 @@ func (r *MariaDBReconciler) reconcileAndWaitForRecoveryJob(ctx context.Context, 
 		var binlogExpireLogsDuration time.Duration
 
 		logger.Info("Getting the binlog_expire_logs_seconds on the external MariaDB")
-		if binlogExpireLogsDuration, err = getBinlogExpireLogsDuration(emdb, ctx, r.RefResolver); err != nil {
+		if binlogExpireLogsDuration, err = getBinlogExpireLogsDuration(emdb, ctx, r.RefResolver, logger); err != nil {
 			return ctrl.Result{}, fmt.Errorf("unable to get binlog_expire_logs_seconds: %v", err)
 		}
 
