@@ -173,7 +173,8 @@ _Appears in:_
 | `storage` _[BackupStorage](#backupstorage)_ | Storage defines the final storage for backups. |  | Required: \{\} <br /> |
 | `schedule` _[Schedule](#schedule)_ | Schedule defines when the Backup will be taken. |  |  |
 | `maxRetention` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | MaxRetention defines the retention policy for backups. Old backups will be cleaned up by the Backup Job.<br />It defaults to 30 days. |  |  |
-| `databases` _string array_ | Databases defines the logical databases to be backed up. If not provided, all databases are backed up. |  |  |
+| `databases` _string array_ | Databases defines the logical databases to be backed up. If not provided, all databases are backed up.<br />Mutually exclusive with Tables. |  |  |
+| `tables` _string array_ | Tables defines specific tables to be backed up, in "database.table" format. Entries may span<br />multiple databases; when they do, --ignore-table flags are built at runtime by querying<br />information_schema so that the dump remains a single consistent transaction. Mutually exclusive with Databases. |  |  |
 | `ignoreGlobalPriv` _boolean_ | IgnoreGlobalPriv indicates to ignore the mysql.global_priv in backups.<br />If not provided, it will default to true when the referred MariaDB instance has Galera enabled and otherwise to false.<br />See: https://github.com/mariadb-operator/mariadb-operator/issues/556 |  |  |
 | `logLevel` _string_ | LogLevel to be used in the Backup Job. It defaults to 'info'. | info | Enum: [debug info warn error dpanic panic fatal] <br /> |
 | `backoffLimit` _integer_ | BackoffLimit defines the maximum number of attempts to successfully take a Backup. |  |  |
@@ -2287,30 +2288,45 @@ _Appears in:_
 | `tcpSocket` _[TCPSocketAction](#tcpsocketaction)_ |  |  |  |
 
 
-<<<<<<< HEAD
 #### ReplicaBootstrapFrom
 
 
 
 ReplicaBootstrapFrom defines the sources for bootstrapping new relicas.
-=======
-#### ReplicaFromExternal
-
-
-
-ReplicaFromExternal is the replication configuration from external servers.
->>>>>>> 7cbe532f (Adding support to external replication)
 
 
 
 _Appears in:_
-<<<<<<< HEAD
 - [ReplicaReplication](#replicareplication)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `physicalBackupTemplateRef` _[LocalObjectReference](#localobjectreference)_ | PhysicalBackupTemplateRef is a reference to a PhysicalBackup object that will be used as template to create a new PhysicalBackup object<br />used synchronize the data from an up to date replica to the new replica to be bootstrapped. |  | Required: \{\} <br /> |
+| `logicalBackupTemplateRef` _[LocalObjectReference](#localobjectreference)_ | LogicalBackupTemplateRef is a reference to a Backup object that will be used as template to create the logical Backup<br />taken from the external MariaDB during external replication initialization and recovery. The template's Spec is copied<br />over (resources, pod template, etc.) and the controller overrides the fields that are managed automatically<br />(MariaDBRef, Storage, Args, Tables, Compression, MaxRetention). |  |  |
 | `restoreJob` _[Job](#job)_ | RestoreJob defines additional properties for the Job used to perform the restoration. |  |  |
+
+
+#### ReplicaFromExternal
+
+
+
+ReplicaFromExternal is the replication configuration from external servers.
+
+
+
+_Appears in:_
+- [Replication](#replication)
+- [ReplicationSpec](#replicationspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `mariaDbRef` _[MariaDBRef](#mariadbref)_ | MariaDBRef is a reference to a MariaDB object. |  | Required: \{\} <br /> |
+| `gtid` _[Gtid](#gtid)_ | Gtid indicates which Global Transaction ID should be used when connecting a replica to the master.<br />See: https://mariadb.com/kb/en/gtid/#using-current_pos-vs-slave_pos. |  | Enum: [CurrentPos SlavePos] <br /> |
+| `connectionTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | ConnectionTimeout to be used when the replica connects to the primary. |  |  |
+| `connectionRetries` _integer_ | ConnectionRetries to be used when the replica connects to the primary. |  |  |
+| `healthCheckInterval` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | HealthCheckInterval to be used when the replica connects to the primary. |  |  |
+| `serverIdOffset` _integer_ | ServerIdOffset to be used on the replicas. |  |  |
+| `filteredReplicaTables` _string array_ | FilteredReplicaTables is an optional list of tables in "database.table" format to replicate.<br />When set, the logical backup will only include these tables and the replication will be<br />configured with replicate_do_table for each entry. GTID strict mode is automatically<br />disabled when this field is set, as partial replication is incompatible with it. |  |  |
 
 
 #### ReplicaRecovery
@@ -2328,19 +2344,6 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `enabled` _boolean_ | Enabled is a flag to enable replica recovery. |  | Required: \{\} <br /> |
 | `errorDurationThreshold` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | ErrorDurationThreshold defines the time duration after which, if a replica continues to report errors,<br />the operator will initiate the recovery process for that replica.<br />This threshold applies only to error codes not identified as recoverable by the operator.<br />Errors identified as recoverable will trigger the recovery process immediately.<br />It defaults to 5 minutes. |  |  |
-=======
-- [Replication](#replication)
-- [ReplicationSpec](#replicationspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `mariaDbRef` _[MariaDBRef](#mariadbref)_ | MariaDBRef is a reference to a MariaDB object. |  | Required: \{\} <br /> |
-| `gtid` _[Gtid](#gtid)_ | Gtid indicates which Global Transaction ID should be used when connecting a replica to the master.<br />See: https://mariadb.com/kb/en/gtid/#using-current_pos-vs-slave_pos. |  | Enum: [CurrentPos SlavePos] <br /> |
-| `connectionTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#duration-v1-meta)_ | ConnectionTimeout to be used when the replica connects to the primary. |  |  |
-| `connectionRetries` _integer_ | ConnectionRetries to be used when the replica connects to the primary. |  |  |
-| `healthCheckInterval` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.34/#duration-v1-meta)_ | HealthCheckInterval to be used when the replica connects to the primary. |  |  |
-| `serverIdOffset` _integer_ | ServerIdOffset to be used on the replicas. |  |  |
->>>>>>> 7cbe532f (Adding support to external replication)
 
 
 #### ReplicaReplication
@@ -2361,6 +2364,8 @@ _Appears in:_
 | `gtid` _[Gtid](#gtid)_ | Gtid indicates which Global Transaction ID (GTID) position mode should be used when connecting a replica to the master.<br />By default, CurrentPos is used.<br />See: https://mariadb.com/docs/server/reference/sql-statements/administrative-sql-statements/replication-statements/change-master-to#master_use_gtid. |  | Enum: [CurrentPos SlavePos] <br /> |
 | `connectionRetrySeconds` _integer_ | ConnectionRetrySeconds is the number of seconds that the replica will wait between connection retries.<br />See: https://mariadb.com/docs/server/reference/sql-statements/administrative-sql-statements/replication-statements/change-master-to#master_connect_retry. |  |  |
 | `maxLagSeconds` _integer_ | MaxLagSeconds is the maximum number of seconds that replicas are allowed to lag behind the primary.<br />If a replica exceeds this threshold, it is marked as not ready and read queries will no longer be forwarded to it.<br />If not provided, it defaults to 0, which means that replicas are not allowed to lag behind the primary (recommended).<br />Lagged replicas will not be taken into account as candidates for the new primary during failover,<br />and they will block other operations, such as switchover and upgrade.<br />This field is not taken into account by MaxScale, you can define the maximum lag as router parameters.<br />See: https://mariadb.com/docs/maxscale/reference/maxscale-routers/maxscale-readwritesplit#max_replication_lag. |  |  |
+| `ignoreMaxLagSeconds` _boolean_ | IgnoreMaxLagSeconds is to ignore the lag behind primary checks.<br />It's useful on situations when is preferred to keep sending read queries on a delayed (or with connection issues)<br />replica than stopping sending traffic. It could be useful when replicating from a external MariaDB when<br />connection issues with primary could happen.<br />If not provided, it defaults to false. |  |  |
+| `ignoreReplicationLivenessProbes` _boolean_ | IgnoreReplicationLivenessProbes is to ignore liveness replication checks.<br />It's useful on situations when is preferred to keep sending read queries on a broken replicas<br />replica than stopping sending traffic.<br />If not provided, it defaults to false. |  |  |
 | `syncTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | SyncTimeout defines the timeout for the synchronization phase during switchover and failover operations.<br />During switchover, all replicas must be synced with the current primary before promoting the new primary.<br />During failover, the new primary must be synced before being promoted as primary. This implies processing all the events in the relay log.<br />When the timeout is reached, the operator restarts the operation from the beginning.<br />It defaults to 10s.<br />See: https://mariadb.com/docs/server/reference/sql-functions/secondary-functions/miscellaneous-functions/master_gtid_wait |  |  |
 | `bootstrapFrom` _[ReplicaBootstrapFrom](#replicabootstrapfrom)_ | ReplicaBootstrapFrom defines the data sources used to bootstrap new replicas.<br />This will be used as part of the scaling out and recovery operations, when new replicas are created.<br />If not provided, scale out and recovery operations will return an error. |  |  |
 | `recovery` _[ReplicaRecovery](#replicarecovery)_ | ReplicaRecovery defines how the replicas should be recovered after they enter an error state.<br />This process deletes data from faulty replicas and recreates them using the source defined in the bootstrapFrom field.<br />It is disabled by default, and it requires the bootstrapFrom field to be set. |  |  |
@@ -2383,10 +2388,10 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `primary` _[PrimaryReplication](#primaryreplication)_ | Primary is the replication configuration for the primary node. |  |  |
 | `replica` _[ReplicaReplication](#replicareplication)_ | ReplicaReplication is the replication configuration for the replica nodes. |  |  |
-<<<<<<< HEAD
 | `gtidStrictMode` _boolean_ | GtidStrictMode determines whether the GTID strict mode is enabled.<br />See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/gtid#gtid_strict_mode.<br />It is enabled by default. |  |  |
 | `semiSyncEnabled` _boolean_ | SemiSyncEnabled determines whether semi-synchronous replication is enabled.<br />Semi-synchronous replication requires that at least one replica should have sent an ACK to the primary node<br />before committing the transaction back to the client.<br />See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/semisynchronous-replication<br />It is enabled by default |  |  |
 | `semiSyncAckTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | SemiSyncAckTimeout for the replica to acknowledge transactions to the primary.<br />It requires semi-synchronous replication to be enabled.<br />See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/semisynchronous-replication#rpl_semi_sync_master_timeout |  |  |
+| `replicaFromExternal` _[ReplicaFromExternal](#replicafromexternal)_ | ReplicaFromExternal specifies whether the replica should be created from an external MariaDB instance. |  |  |
 | `semiSyncWaitPoint` _[WaitPoint](#waitpoint)_ | SemiSyncWaitPoint determines whether the transaction should wait for an ACK after having synced the binlog (AfterSync)<br />or after having committed to the storage engine (AfterCommit, the default).<br />It requires semi-synchronous replication to be enabled.<br />See: https://mariadb.com/kb/en/semisynchronous-replication/#rpl_semi_sync_master_wait_point. |  | Enum: [AfterSync AfterCommit] <br /> |
 | `syncBinlog` _integer_ | SyncBinlog indicates after how many events the binary log is synchronized to the disk.<br />See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/replication-and-binary-log-system-variables#sync_binlog |  |  |
 | `initContainer` _[InitContainer](#initcontainer)_ | InitContainer is an init container that runs in the MariaDB Pod and co-operates with mariadb-operator. |  |  |
@@ -2395,12 +2400,6 @@ _Appears in:_
 | `enabled` _boolean_ | Enabled is a flag to enable replication. |  |  |
 
 
-=======
-| `replicaFromExternal` _[ReplicaFromExternal](#replicafromexternal)_ | ReplicaReplication is the replication configuration for the replica nodes. |  |  |
-| `syncBinlog` _integer_ | SyncBinlog indicates whether the binary log should be synchronized to the disk after every event.<br />It trades off performance for consistency.<br />See: https://mariadb.com/kb/en/replication-and-binary-log-system-variables/#sync_binlog. |  |  |
-| `probesEnabled` _boolean_ | ProbesEnabled indicates to use replication specific liveness and readiness probes.<br />This probes check that the primary can receive queries and that the replica has the replication thread running. |  |  |
-| `enabled` _boolean_ | Enabled is a flag to enable Replication. |  |  |
->>>>>>> 7cbe532f (Adding support to external replication)
 
 
 #### ReplicationSpec
@@ -2418,22 +2417,15 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `primary` _[PrimaryReplication](#primaryreplication)_ | Primary is the replication configuration for the primary node. |  |  |
 | `replica` _[ReplicaReplication](#replicareplication)_ | ReplicaReplication is the replication configuration for the replica nodes. |  |  |
-<<<<<<< HEAD
 | `gtidStrictMode` _boolean_ | GtidStrictMode determines whether the GTID strict mode is enabled.<br />See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/gtid#gtid_strict_mode.<br />It is enabled by default. |  |  |
 | `semiSyncEnabled` _boolean_ | SemiSyncEnabled determines whether semi-synchronous replication is enabled.<br />Semi-synchronous replication requires that at least one replica should have sent an ACK to the primary node<br />before committing the transaction back to the client.<br />See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/semisynchronous-replication<br />It is enabled by default |  |  |
 | `semiSyncAckTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#duration-v1-meta)_ | SemiSyncAckTimeout for the replica to acknowledge transactions to the primary.<br />It requires semi-synchronous replication to be enabled.<br />See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/semisynchronous-replication#rpl_semi_sync_master_timeout |  |  |
+| `replicaFromExternal` _[ReplicaFromExternal](#replicafromexternal)_ | ReplicaFromExternal specifies whether the replica should be created from an external MariaDB instance. |  |  |
 | `semiSyncWaitPoint` _[WaitPoint](#waitpoint)_ | SemiSyncWaitPoint determines whether the transaction should wait for an ACK after having synced the binlog (AfterSync)<br />or after having committed to the storage engine (AfterCommit, the default).<br />It requires semi-synchronous replication to be enabled.<br />See: https://mariadb.com/kb/en/semisynchronous-replication/#rpl_semi_sync_master_wait_point. |  | Enum: [AfterSync AfterCommit] <br /> |
 | `syncBinlog` _integer_ | SyncBinlog indicates after how many events the binary log is synchronized to the disk.<br />See: https://mariadb.com/docs/server/ha-and-performance/standard-replication/replication-and-binary-log-system-variables#sync_binlog |  |  |
 | `initContainer` _[InitContainer](#initcontainer)_ | InitContainer is an init container that runs in the MariaDB Pod and co-operates with mariadb-operator. |  |  |
 | `agent` _[Agent](#agent)_ | Agent is a sidecar agent that runs in the MariaDB Pod and co-operates with mariadb-operator. |  |  |
 | `standaloneProbes` _boolean_ | StandaloneProbes indicates whether to use the default non-HA startup and liveness probes.<br />It is disabled by default |  |  |
-=======
-| `replicaFromExternal` _[ReplicaFromExternal](#replicafromexternal)_ | ReplicaReplication is the replication configuration for the replica nodes. |  |  |
-| `syncBinlog` _integer_ | SyncBinlog indicates whether the binary log should be synchronized to the disk after every event.<br />It trades off performance for consistency.<br />See: https://mariadb.com/kb/en/replication-and-binary-log-system-variables/#sync_binlog. |  |  |
-| `probesEnabled` _boolean_ | ProbesEnabled indicates to use replication specific liveness and readiness probes.<br />This probes check that the primary can receive queries and that the replica has the replication thread running. |  |  |
-
-
->>>>>>> 7cbe532f (Adding support to external replication)
 
 
 #### ResourceRequirements
@@ -2817,6 +2809,7 @@ _Appears in:_
 | `externalTrafficPolicy` _[ServiceExternalTrafficPolicy](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#serviceexternaltrafficpolicy-v1-core)_ | ExternalTrafficPolicy Service field. |  |  |
 | `sessionAffinity` _[ServiceAffinity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#serviceaffinity-v1-core)_ | SessionAffinity Service field. |  |  |
 | `allocateLoadBalancerNodePorts` _boolean_ | AllocateLoadBalancerNodePorts Service field. |  |  |
+| `loadBalancerClass` _string_ | LoadBalancerClass Service field. |  |  |
 
 
 #### SqlJob
